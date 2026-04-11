@@ -1,11 +1,13 @@
-using System.Threading;
-using System.Threading.Tasks;
+using TermForge.Contracts;
 
 namespace TermForge.Core.Interfaces;
 
 public interface IConfigStore
 {
-    Task<string?> LoadAsync(CancellationToken cancellationToken = default);
-
-    Task SaveAsync(string content, CancellationToken cancellationToken = default);
+    ProxyConfigSnapshot ReadProxyConfig();
+    void WriteProxyConfig(ProxyConfigSnapshot snapshot);
+    string GetRootPath();
+    string GetConfigPath();
+    string GetModuleStatePath();
+    IReadOnlyList<string> GetEnabledModules();
 }

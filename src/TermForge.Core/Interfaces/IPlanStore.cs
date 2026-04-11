@@ -1,11 +1,9 @@
-using System.Threading;
-using System.Threading.Tasks;
+using TermForge.Contracts;
 
 namespace TermForge.Core.Interfaces;
 
 public interface IPlanStore
 {
-    Task<string?> LoadAsync(string planId, CancellationToken cancellationToken = default);
-
-    Task SaveAsync(string planId, string content, CancellationToken cancellationToken = default);
+    ProxyPlanPayload? GetPlan(string planId);
+    void SavePlan(ProxyPlanPayload plan);
 }
