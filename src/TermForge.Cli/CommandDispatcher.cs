@@ -77,8 +77,9 @@ internal sealed class CommandDispatcher
         if (string.Equals(mode, "enable", StringComparison.OrdinalIgnoreCase))
         {
             var http = GetRequiredValue(options, "--http");
-            var https = options.GetValueOrDefault("--https") ?? string.Empty;
-            var noProxy = options.GetValueOrDefault("--no-proxy") ?? string.Empty;
+            RequireValues(options, "--https", "--no-proxy");
+            var https = GetRequiredValue(options, "--https");
+            var noProxy = GetRequiredValue(options, "--no-proxy");
             return CreateWorkflowService().PlanEnable(http, https, noProxy);
         }
 
@@ -153,6 +154,18 @@ internal sealed class CommandDispatcher
         }
 
         return value;
+    }
+
+    private static void RequireValues(Dictionary<string, string?> options, params string[] names)
+    {
+        var missing = names
+            .Where(name => !options.TryGetValue(name, out var value) || string.IsNullOrWhiteSpace(value))
+            .ToArray();
+
+        if (missing.Length > 0)
+        {
+            throw new InvalidOperationException($"Missing required option(s): {string.Join(", ", missing)}");
+        }
     }
 
     private static void RequireJson(Dictionary<string, string?> options)
