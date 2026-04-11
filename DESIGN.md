@@ -56,6 +56,24 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 - 可以在“纯净 Windows 10 / 11”环境里先明确告诉用户缺什么
 - 可以把“阻塞项”和“可选项”分开处理，避免用户走到中途才失败
 
+## 控制面模型
+
+当前 phase1 额外引入 `.NET` 控制核心：
+
+1. `TermForge.Contracts`
+2. `TermForge.Core`
+3. `TermForge.Platform`
+4. `TermForge.Platform.Windows`
+5. `TermForge.Cli`
+
+职责边界：
+
+- PowerShell 继续负责安装、profile 注入、模块加载和交互式入口
+- `.NET` 负责结构化 `status` 输出和 env 目标代理工作流
+- PowerShell 通过桥接把 `status --json` 与 `proxy scan/plan/apply/rollback --json` 转发到 `.NET CLI`
+
+这样可以在不重写安装器和运行时入口的前提下，先把 agent 需要的机器可读契约稳定下来。
+
 ## 主命令模型
 
 内部管理函数固定为 `Invoke-SccManagerCommand`，外部暴露的主命令来自 `cli.commandName`。
@@ -115,6 +133,15 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 这里的“启用模块”只表示命令入口可用，不代表一定产生副作用。`proxy` 模块虽然默认启用，但只有在 `proxy.enabled = true` 时才会向环境变量写入代理。
 
 `proxy` 模块还提供 `proxy bypass add <host>`，用于把本地服务、容器桥接地址或其他直连目标追加到 `proxy.noProxy` 并写回配置；若代理当前已启用，则会同步刷新当前会话的 `no_proxy/NO_PROXY`。
+
+在当前 phase1 中，`proxy` 模块的结构化工作流由 `.NET CLI` 接管：
+
+- `proxy scan --json`
+- `proxy plan --mode <enable|disable> --targets env ... --json`
+- `proxy apply --plan-id <id> --json`
+- `proxy rollback --change-id <id> --json`
+
+当前仍只支持 `env` 目标；`git/npm/pip` 等应用级适配器留在后续阶段。
 
 ## 主题策略
 

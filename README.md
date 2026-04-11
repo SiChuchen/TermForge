@@ -21,6 +21,7 @@
 - 固定恢复入口 `wtctl`
 - `proxy` / `theme` 两个基础模块
 - `termforge doctor` 诊断输出与 `verify.ps1` smoke test
+- `.NET` 控制面 CLI，当前承接 `status --json` 与 env 目标 `proxy scan/plan/apply/rollback`
 - CMD + Clink + Oh My Posh 集成
 - Nerd Font 安装与 Windows Terminal / VS Code 字体写入
 - 本地回环默认代理绕过：`127.0.0.1,localhost,::1`
@@ -53,6 +54,12 @@ TermForge 的运行时分成三层：
 1. 用户真实 profile
 2. 受管 profile 入口
 3. `bootstrap.ps1` + `modules/*`
+
+在当前 phase1 中，还额外引入了一层结构化控制面：
+
+4. `.NET CLI` (`src/TermForge.Cli`)
+
+PowerShell 继续保留为安装器、profile 注入和命令入口；`status --json` 与 env 目标代理工作流则转发到 `.NET` 控制面，输出稳定的 JSON envelope，供 agent 或后续 MCP 封装调用。
 
 这样做的目的很明确：
 
@@ -117,6 +124,11 @@ termforge list
 termforge doctor
 termforge doctor fancy
 termforge doctor json
+termforge status --json
+proxy scan --json
+proxy plan --mode enable --targets env --http http://127.0.0.1:7890 --https http://127.0.0.1:7890 --no-proxy 127.0.0.1,localhost,::1 --json
+proxy apply --plan-id <id> --json
+proxy rollback --change-id <id> --json
 termforge help proxy
 proxy
 proxy bypass add 127.0.0.1 localhost host.docker.internal
@@ -130,6 +142,8 @@ poshs <theme>
 
 - `termforge` 是默认主命令，可在安装时修改
 - `wtctl` 始终保留为恢复入口
+- `termforge status --json` 现在通过 `.NET` 控制面输出机器可读状态
+- `proxy scan/plan/apply/rollback --json` 当前只支持 `env` 目标
 - `proxy bypass add` 会把目标追加到 `proxy.noProxy`
 - 当 `proxy.enabled = true` 时，新增绕过项会立即同步到当前会话的 `no_proxy/NO_PROXY`
 

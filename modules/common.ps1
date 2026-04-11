@@ -26,6 +26,21 @@ function Get-SccConfigPath {
     return (Join-Path (Get-SccRootPath) "scc.config.json")
 }
 
+function Get-SccDotNetCliProjectPath {
+    return (Join-Path (Get-SccRootPath) "src\TermForge.Cli\TermForge.Cli.csproj")
+}
+
+function Invoke-SccDotNetCli {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
+
+    $projectPath = Get-SccDotNetCliProjectPath
+    if (-not (Test-Path $projectPath)) {
+        throw "缺少 .NET CLI 项目: $projectPath"
+    }
+
+    & dotnet run --project $projectPath -- @Arguments
+}
+
 function Get-SccDefaultProfileEntries {
     $rootPath = Get-SccRootPath
 

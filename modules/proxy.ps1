@@ -4,8 +4,8 @@ if (Test-Path $commonPath) {
 }
 
 Initialize-SccHelpRegistry
-Register-SccHelp -ModuleName "proxy" -HelpText "proxy - 查看当前终端代理配置与环境变量状态`nproxy bypass add <host> [更多 host] - 追加 NO_PROXY 绕过项并写回配置"
-Register-SccCommandHelp -CommandName "proxy" -ModuleName "proxy" -HelpText "用法: proxy [-Help]`n      proxy bypass add <host> [更多 host]`n作用: 显示代理模块的启用状态、HTTP/HTTPS/NO_PROXY 配置和当前终端环境变量；或把主机名/IP 追加到 noProxy 配置。`n说明: bypass add 支持逗号分隔；请传 localhost、127.0.0.1、host.docker.internal 这类主机/IP，不要带 http://。"
+Register-SccHelp -ModuleName "proxy" -HelpText "proxy - 查看当前终端代理配置与环境变量状态`nproxy scan --json - 输出 env 目标的结构化代理状态`nproxy plan/apply/rollback ... --json - 调用 .NET 控制面执行 env 代理工作流`nproxy bypass add <host> [更多 host] - 追加 NO_PROXY 绕过项并写回配置"
+Register-SccCommandHelp -CommandName "proxy" -ModuleName "proxy" -HelpText "用法: proxy [-Help]`n      proxy scan --json`n      proxy plan --mode <enable|disable> --targets env ... --json`n      proxy apply --plan-id <id> --json`n      proxy rollback --change-id <id> --json`n      proxy bypass add <host> [更多 host]`n作用: 显示代理模块的启用状态；调用 .NET 控制面执行 env 目标的 scan/plan/apply/rollback；或把主机名/IP 追加到 noProxy 配置。`n说明: bypass add 支持逗号分隔；请传 localhost、127.0.0.1、host.docker.internal 这类主机/IP，不要带 http://。"
 
 $config = Get-SccConfig
 $script:ProxyEnabled = [bool]$config.proxy.enabled
@@ -184,6 +184,18 @@ function proxy {
                 return
             }
         }
+    }
+
+    if ($normalizedAction -in @('scan','plan','apply','rollback')) {
+        $bridgeArgs = @('proxy', $normalizedAction)
+        if (-not [string]::IsNullOrWhiteSpace($SubAction)) {
+            $bridgeArgs += $SubAction
+        }
+        if ($Arguments.Count -gt 0) {
+            $bridgeArgs += $Arguments
+        }
+        Invoke-SccDotNetCli @bridgeArgs
+        return
     }
 
     Show-SccProxyStatus

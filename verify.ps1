@@ -58,6 +58,12 @@ function Invoke-SccProfileSmokeTest {
                 throw "$commandName doctor json 返回结果缺少 OverallStatus。"
             }
 
+            $statusJson = & $commandName status --json | Out-String
+            $status = $statusJson | ConvertFrom-Json
+            if ($status.SchemaVersion -ne "2026-04-11") {
+                throw "$commandName status --json 未返回 .NET 控制面契约。"
+            }
+
             $enabledModules = Get-SccEnabledModuleNames -State $state
             $verifiedCommands = @()
 
@@ -71,6 +77,11 @@ function Invoke-SccProfileSmokeTest {
 
                     & $entry.CommandName help *> $null
                     if ($entry.CommandName -eq "proxy") {
+                        $scanJson = & $entry.CommandName scan --json | Out-String
+                        $scanReport = $scanJson | ConvertFrom-Json
+                        if ($scanReport.SchemaVersion -ne "2026-04-11" -or $scanReport.Command -ne "proxy.scan") {
+                            throw "proxy scan --json 未返回 .NET 控制面代理契约。"
+                        }
                         & $entry.CommandName bypass add 127.0.0.1 *> $null
                     }
                     $verifiedCommands += $entry.CommandName

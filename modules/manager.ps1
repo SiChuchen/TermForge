@@ -12,7 +12,7 @@ function Show-SccManagerHelp {
     Write-Host "=== 系统模块管理器 ===" -ForegroundColor Cyan
     Write-Host "用法: $commandName <命令> [模块名|命令名|模式]"
     Write-Host "命令:"
-    Write-Host "  list | status        - 查看模块状态及可用子命令"
+    Write-Host "  list | status [--json] - 查看模块状态及可用子命令"
     Write-Host "  doctor [模式]        - 执行当前会话诊断；模式: default | fancy | verbose | json"
     Write-Host "  enable <模块名>      - 启用已存在的模块"
     Write-Host "  disable <模块名>     - 禁用指定模块"
@@ -116,7 +116,8 @@ function Set-SccModuleState {
 function Invoke-SccManagerCommand {
     param(
         [ValidateSet('list','status','doctor','enable','disable','help','reload')][string]$Action = 'help',
-        [string]$Module
+        [string]$Module,
+        [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
     )
 
     $commandName = Get-SccPrimaryCommandName
@@ -133,6 +134,19 @@ function Invoke-SccManagerCommand {
             }
         }
         'status' {
+            $statusTail = @()
+            if (-not [string]::IsNullOrWhiteSpace($Module)) {
+                $statusTail += $Module
+            }
+            if ($Arguments.Count -gt 0) {
+                $statusTail += $Arguments
+            }
+
+            if ($statusTail -contains '--json') {
+                Invoke-SccDotNetCli status --json
+                return
+            }
+
             try {
                 Show-SccModuleList -State (Ensure-SccStateFile) -AvailableModules (Get-SccAvailableModuleNames)
             } catch {
