@@ -41,6 +41,12 @@ public sealed class WindowsEnvironmentAdapter : IPlatformEnvironmentAdapter
     {
         foreach (var name in names)
         {
+            var userValue = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+            if (!string.IsNullOrWhiteSpace(userValue))
+            {
+                return userValue;
+            }
+
             var value = Environment.GetEnvironmentVariable(name);
             if (!string.IsNullOrWhiteSpace(value))
             {
@@ -56,10 +62,12 @@ public sealed class WindowsEnvironmentAdapter : IPlatformEnvironmentAdapter
         if (string.IsNullOrWhiteSpace(value))
         {
             Environment.SetEnvironmentVariable(name, null);
+            Environment.SetEnvironmentVariable(name, null, EnvironmentVariableTarget.User);
             return;
         }
 
         Environment.SetEnvironmentVariable(name, value);
+        Environment.SetEnvironmentVariable(name, value, EnvironmentVariableTarget.User);
     }
 
     private static void Clear(params string[] names)
@@ -67,6 +75,7 @@ public sealed class WindowsEnvironmentAdapter : IPlatformEnvironmentAdapter
         foreach (var name in names)
         {
             Environment.SetEnvironmentVariable(name, null);
+            Environment.SetEnvironmentVariable(name, null, EnvironmentVariableTarget.User);
         }
     }
 }

@@ -2,33 +2,31 @@ namespace TermForge.Cli;
 
 internal sealed record AppPaths(
     string RepoRoot,
-    string TermForgeRoot,
     string ConfigPath,
     string ModuleStatePath,
     string PlanStorePath,
     string OperationLedgerPath)
 {
-    public static AppPaths Create(string workingDirectory)
+    public static AppPaths Create(string startPath)
     {
-        var repoRoot = FindRepoRoot(workingDirectory);
-        var termForgeRoot = Path.Combine(repoRoot, ".termforge");
-        var stateRoot = Path.Combine(termForgeRoot, "state");
+        var repoRoot = FindRepoRoot(startPath);
+        var stateRoot = Path.Combine(repoRoot, "state");
 
         return new AppPaths(
             RepoRoot: repoRoot,
-            TermForgeRoot: termForgeRoot,
-            ConfigPath: Path.Combine(termForgeRoot, "config.json"),
-            ModuleStatePath: Path.Combine(termForgeRoot, "module-state.json"),
+            ConfigPath: Path.Combine(repoRoot, "scc.config.json"),
+            ModuleStatePath: Path.Combine(repoRoot, "module_state.json"),
             PlanStorePath: Path.Combine(stateRoot, "proxy-plans.json"),
             OperationLedgerPath: Path.Combine(stateRoot, "proxy-ledger.json"));
     }
 
-    private static string FindRepoRoot(string workingDirectory)
+    private static string FindRepoRoot(string startPath)
     {
-        var current = new DirectoryInfo(Path.GetFullPath(workingDirectory));
+        var current = new DirectoryInfo(Path.GetFullPath(startPath));
         while (current is not null)
         {
-            if (File.Exists(Path.Combine(current.FullName, "TermForge.sln")))
+            if (File.Exists(Path.Combine(current.FullName, "TermForge.sln")) ||
+                File.Exists(Path.Combine(current.FullName, "setup.ps1")))
             {
                 return current.FullName;
             }
@@ -36,6 +34,6 @@ internal sealed record AppPaths(
             current = current.Parent;
         }
 
-        return Path.GetFullPath(workingDirectory);
+        return Path.GetFullPath(startPath);
     }
 }
