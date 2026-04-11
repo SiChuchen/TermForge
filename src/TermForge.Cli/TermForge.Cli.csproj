@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>TermForge.Cli</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TermForge.Contracts\TermForge.Contracts.csproj" />
+    <ProjectReference Include="..\TermForge.Core\TermForge.Core.csproj" />
+    <ProjectReference Include="..\TermForge.Platform\TermForge.Platform.csproj" />
+    <ProjectReference Include="..\TermForge.Platform.Windows\TermForge.Platform.Windows.csproj" />
+  </ItemGroup>
+</Project>

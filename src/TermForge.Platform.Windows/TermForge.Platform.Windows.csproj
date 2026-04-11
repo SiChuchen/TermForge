@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\TermForge.Contracts\TermForge.Contracts.csproj" />
+    <ProjectReference Include="..\TermForge.Platform\TermForge.Platform.csproj" />
+  </ItemGroup>
+  <PropertyGroup>
+    <AssemblyName>TermForge.Platform.Windows</AssemblyName>
+  </PropertyGroup>
+</Project>

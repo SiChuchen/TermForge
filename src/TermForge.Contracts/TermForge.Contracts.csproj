@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>TermForge.Contracts</AssemblyName>
+  </PropertyGroup>
+</Project>

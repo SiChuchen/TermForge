@@ -1,0 +1,48 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TermForge.Contracts", "src\TermForge.Contracts\TermForge.Contracts.csproj", "{4F4E5D2A-7E83-4E43-9D8A-6A5A3C81B0B1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TermForge.Core", "src\TermForge.Core\TermForge.Core.csproj", "{E5B4A0E1-4EAB-4A58-A39B-30A9B056D6D5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TermForge.Platform", "src\TermForge.Platform\TermForge.Platform.csproj", "{A2E7C8B2-4B53-4D3A-8A4C-1B3A5C63D3DE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TermForge.Platform.Windows", "src\TermForge.Platform.Windows\TermForge.Platform.Windows.csproj", "{7E6C1E0B-3A9E-4CC0-8E8A-F0E0B0E7C0A1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TermForge.Cli", "src\TermForge.Cli\TermForge.Cli.csproj", "{8D5B5B7F-4E5B-4E21-9A2C-0A36B9F8F0C2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TermForge.Core.Tests", "tests\TermForge.Core.Tests\TermForge.Core.Tests.csproj", "{B6A6E5D2-7D5E-4B88-AF3D-1A1D3CF1F6A3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4F4E5D2A-7E83-4E43-9D8A-6A5A3C81B0B1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4F4E5D2A-7E83-4E43-9D8A-6A5A3C81B0B1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4F4E5D2A-7E83-4E43-9D8A-6A5A3C81B0B1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4F4E5D2A-7E83-4E43-9D8A-6A5A3C81B0B1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E5B4A0E1-4EAB-4A58-A39B-30A9B056D6D5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E5B4A0E1-4EAB-4A58-A39B-30A9B056D6D5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E5B4A0E1-4EAB-4A58-A39B-30A9B056D6D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E5B4A0E1-4EAB-4A58-A39B-30A9B056D6D5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A2E7C8B2-4B53-4D3A-8A4C-1B3A5C63D3DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A2E7C8B2-4B53-4D3A-8A4C-1B3A5C63D3DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A2E7C8B2-4B53-4D3A-8A4C-1B3A5C63D3DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A2E7C8B2-4B53-4D3A-8A4C-1B3A5C63D3DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7E6C1E0B-3A9E-4CC0-8E8A-F0E0B0E7C0A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7E6C1E0B-3A9E-4CC0-8E8A-F0E0B0E7C0A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7E6C1E0B-3A9E-4CC0-8E8A-F0E0B0E7C0A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7E6C1E0B-3A9E-4CC0-8E8A-F0E0B0E7C0A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8D5B5B7F-4E5B-4E21-9A2C-0A36B9F8F0C2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8D5B5B7F-4E5B-4E21-9A2C-0A36B9F8F0C2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8D5B5B7F-4E5B-4E21-9A2C-0A36B9F8F0C2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8D5B5B7F-4E5B-4E21-9A2C-0A36B9F8F0C2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B6A6E5D2-7D5E-4B88-AF3D-1A1D3CF1F6A3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B6A6E5D2-7D5E-4B88-AF3D-1A1D3CF1F6A3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B6A6E5D2-7D5E-4B88-AF3D-1A1D3CF1F6A3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B6A6E5D2-7D5E-4B88-AF3D-1A1D3CF1F6A3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
