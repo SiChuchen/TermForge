@@ -1,4 +1,5 @@
 *.zip
+.worktrees/
 else/
 themes/active.omp.json
 scc.config.json
