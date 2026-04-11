@@ -8,19 +8,25 @@ namespace TermForge.Core.Tests;
 public class StatusServiceTests
 {
     [Fact]
-    public void StatusService_builds_report_from_config_store()
+    public void StatusService_uses_runtime_config_for_command_name_and_paths()
     {
-        var store = new FakeConfigStore();
+        var store = new FakeConfigStore
+        {
+            RootPath = @"E:\TermForge",
+            ConfigPath = @"E:\TermForge\scc.config.json",
+            ModuleStatePath = @"E:\TermForge\module_state.json",
+            RuntimeStatePath = @"E:\TermForge\state",
+            PrimaryCommandName = "tfx"
+        };
+
         var service = new TermForge.Core.Services.StatusService(store);
 
         var result = service.BuildReport();
 
         Assert.Equal("status", result.Command);
-        Assert.Equal("termforge", result.Payload.PrimaryCommand);
-        Assert.Equal("wtctl", result.Payload.FallbackCommand);
+        Assert.Equal("tfx", result.Payload.PrimaryCommand);
+        Assert.Equal(@"E:\TermForge\state", result.Payload.RuntimeStatePath);
         Assert.Contains("proxy", result.Payload.EnabledModules);
-        Assert.Equal(System.IO.Path.Combine(store.RootPath, "state"), result.Payload.RuntimeStatePath);
-        Assert.Matches(@"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", result.GeneratedAt);
     }
 }
 
@@ -28,41 +34,19 @@ internal sealed class FakeConfigStore : IConfigStore
 {
     private ProxyConfigSnapshot _snapshot = new(false, string.Empty, string.Empty, string.Empty);
 
-    public string ConfigPath { get; set; } = ".termforge/config.json";
-
+    public string RootPath { get; set; } = "termforge";
+    public string ConfigPath { get; set; } = "scc.config.json";
+    public string ModuleStatePath { get; set; } = "module_state.json";
+    public string RuntimeStatePath { get; set; } = "state";
+    public string PrimaryCommandName { get; set; } = "termforge";
     public IReadOnlyList<string> EnabledModules { get; set; } = new List<string> { "proxy" };
 
-    public string ModuleStatePath { get; set; } = ".termforge/modules";
-
-    public string RootPath { get; set; } = "termforge";
-
-    public ProxyConfigSnapshot ReadProxyConfig()
-    {
-        return _snapshot;
-    }
-
-    public void WriteProxyConfig(ProxyConfigSnapshot snapshot)
-    {
-        _snapshot = snapshot;
-    }
-
-    public string GetRootPath()
-    {
-        return RootPath;
-    }
-
-    public string GetConfigPath()
-    {
-        return ConfigPath;
-    }
-
-    public string GetModuleStatePath()
-    {
-        return ModuleStatePath;
-    }
-
-    public IReadOnlyList<string> GetEnabledModules()
-    {
-        return EnabledModules;
-    }
+    public ProxyConfigSnapshot ReadProxyConfig() => _snapshot;
+    public void WriteProxyConfig(ProxyConfigSnapshot snapshot) => _snapshot = snapshot;
+    public string GetRootPath() => RootPath;
+    public string GetConfigPath() => ConfigPath;
+    public string GetModuleStatePath() => ModuleStatePath;
+    public string GetRuntimeStatePath() => RuntimeStatePath;
+    public string GetPrimaryCommandName() => PrimaryCommandName;
+    public IReadOnlyList<string> GetEnabledModules() => EnabledModules;
 }

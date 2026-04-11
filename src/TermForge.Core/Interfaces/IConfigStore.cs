@@ -9,5 +9,7 @@ public interface IConfigStore
     string GetRootPath();
     string GetConfigPath();
     string GetModuleStatePath();
+    string GetRuntimeStatePath();
+    string GetPrimaryCommandName();
     IReadOnlyList<string> GetEnabledModules();
 }
