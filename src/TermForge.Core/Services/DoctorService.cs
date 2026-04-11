@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using TermForge.Contracts;
 using TermForge.Core.Interfaces;
@@ -40,14 +39,14 @@ public sealed class DoctorService
             Profiles: profiles,
             EnabledModules: enabledModules,
             Tools: tools,
-            Issues: Array.Empty<DoctorIssue>());
+            Issues: []);
 
         return new CommandEnvelope<DoctorPayload>(
             Command: "doctor",
             Status: "PASS",
             GeneratedAt: DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-            Warnings: Array.Empty<string>(),
-            Errors: Array.Empty<string>(),
+            Warnings: [],
+            Errors: [],
             Payload: payload);
     }
 }
