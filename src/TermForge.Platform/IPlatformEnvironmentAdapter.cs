@@ -5,5 +5,5 @@ namespace TermForge.Platform;
 public interface IPlatformEnvironmentAdapter
 {
     ProxyConfigSnapshot ReadEnvironmentProxy();
-    ProxyConfigSnapshot ApplyEnvironmentProxy(ProxyConfigSnapshot snapshot);
+    void ApplyEnvironmentProxy(ProxyConfigSnapshot snapshot);
 }

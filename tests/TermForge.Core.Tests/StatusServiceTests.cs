@@ -17,7 +17,10 @@ public class StatusServiceTests
 
         Assert.Equal("status", result.Command);
         Assert.Equal("termforge", result.Payload.PrimaryCommand);
+        Assert.Equal("wtctl", result.Payload.FallbackCommand);
         Assert.Contains("proxy", result.Payload.EnabledModules);
+        Assert.Equal(System.IO.Path.Combine(store.RootPath, "state"), result.Payload.RuntimeStatePath);
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", result.GeneratedAt);
     }
 }
 

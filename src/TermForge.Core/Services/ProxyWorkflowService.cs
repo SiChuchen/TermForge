@@ -34,7 +34,7 @@ public sealed class ProxyWorkflowService
 
     public CommandEnvelope<ProxyPlanPayload> PlanEnable(string httpProxy, string httpsProxy, string noProxy)
     {
-        var current = _configStore.ReadProxyConfig();
+        var current = _environmentAdapter.ReadEnvironmentProxy();
         var desired = NormalizeSnapshot(new ProxyConfigSnapshot(true, httpProxy, httpsProxy, noProxy));
         var payload = new ProxyPlanPayload(CreateId("plan"), "env", "enable", current, desired);
         _planStore.SavePlan(payload);
@@ -44,7 +44,8 @@ public sealed class ProxyWorkflowService
     public CommandEnvelope<ProxyApplyPayload> Apply(string planId)
     {
         var plan = _planStore.GetPlan(planId) ?? throw new InvalidOperationException($"Plan not found: {planId}");
-        var applied = _environmentAdapter.ApplyEnvironmentProxy(plan.Desired);
+        _environmentAdapter.ApplyEnvironmentProxy(plan.Desired);
+        var applied = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
         _configStore.WriteProxyConfig(applied);
 
         var payload = new ProxyApplyPayload(CreateId("change"), plan.PlanId, plan.Target, applied);
@@ -56,7 +57,8 @@ public sealed class ProxyWorkflowService
     {
         var change = _ledger.GetChange(changeId) ?? throw new InvalidOperationException($"Change not found: {changeId}");
         var plan = _planStore.GetPlan(change.PlanId) ?? throw new InvalidOperationException($"Plan not found: {change.PlanId}");
-        var reverted = _environmentAdapter.ApplyEnvironmentProxy(plan.Before);
+        _environmentAdapter.ApplyEnvironmentProxy(plan.Before);
+        var reverted = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
         _configStore.WriteProxyConfig(reverted);
 
         var payload = new ProxyApplyPayload(CreateId("change"), plan.PlanId, change.Target, reverted);
@@ -77,7 +79,7 @@ public sealed class ProxyWorkflowService
 
     private string CreateId(string prefix)
     {
-        return $"{prefix}-{_clock.NowText()}";
+        return $"{prefix}-{_clock.NowText()}-{Guid.NewGuid():N}";
     }
 
     private static ProxyConfigSnapshot NormalizeSnapshot(ProxyConfigSnapshot snapshot)

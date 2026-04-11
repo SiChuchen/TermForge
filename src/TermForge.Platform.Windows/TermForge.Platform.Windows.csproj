@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="..\TermForge.Contracts\TermForge.Contracts.csproj" />
+    <ProjectReference Include="..\TermForge.Core\TermForge.Core.csproj" />
     <ProjectReference Include="..\TermForge.Platform\TermForge.Platform.csproj" />
   </ItemGroup>
 </Project>

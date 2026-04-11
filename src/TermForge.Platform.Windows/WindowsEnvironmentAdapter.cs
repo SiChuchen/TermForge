@@ -15,12 +15,12 @@ public sealed class WindowsEnvironmentAdapter : IPlatformEnvironmentAdapter
         return new ProxyConfigSnapshot(enabled, http, https, noProxy);
     }
 
-    public ProxyConfigSnapshot ApplyEnvironmentProxy(ProxyConfigSnapshot snapshot)
+    public void ApplyEnvironmentProxy(ProxyConfigSnapshot snapshot)
     {
         if (!snapshot.Enabled)
         {
             Clear("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "no_proxy", "NO_PROXY");
-            return new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty);
+            return;
         }
 
         var normalized = new ProxyConfigSnapshot(
@@ -35,8 +35,6 @@ public sealed class WindowsEnvironmentAdapter : IPlatformEnvironmentAdapter
         Write("HTTPS_PROXY", normalized.Https);
         Write("no_proxy", normalized.NoProxy);
         Write("NO_PROXY", normalized.NoProxy);
-
-        return normalized;
     }
 
     private static string ReadFirst(params string[] names)

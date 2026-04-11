@@ -23,12 +23,12 @@ public sealed class StatusService
             EnabledModules: _configStore.GetEnabledModules(),
             ConfigPath: _configStore.GetConfigPath(),
             ModuleStatePath: _configStore.GetModuleStatePath(),
-            RuntimeStatePath: Path.Combine(_configStore.GetRootPath(), "runtime"));
+            RuntimeStatePath: Path.Combine(_configStore.GetRootPath(), "state"));
 
         return new CommandEnvelope<StatusPayload>(
             Command: "status",
             Status: "PASS",
-            GeneratedAt: DateTimeOffset.UtcNow.ToString("O"),
+            GeneratedAt: DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             Warnings: [],
             Errors: [],
             Payload: payload);
