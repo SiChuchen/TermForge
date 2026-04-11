@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using TermForge.Contracts;
+using TermForge.Core.Interfaces;
 using Xunit;
 
 namespace TermForge.Core.Tests;
@@ -5,22 +8,58 @@ namespace TermForge.Core.Tests;
 public class StatusServiceTests
 {
     [Fact]
-    public void Solution_bootstrap_test_project_compiles()
+    public void StatusService_builds_report_from_config_store()
     {
-        Assert.True(true);
+        var store = new FakeConfigStore();
+        var service = new TermForge.Core.Services.StatusService(store);
+
+        var result = service.BuildReport();
+
+        Assert.Equal("status", result.Command);
+        Assert.Equal("termforge", result.Payload.PrimaryCommand);
+        Assert.Contains("proxy", result.Payload.EnabledModules);
+    }
+}
+
+internal sealed class FakeConfigStore : IConfigStore
+{
+    private ProxyConfigSnapshot _snapshot = new(false, string.Empty, string.Empty, string.Empty);
+
+    public string ConfigPath { get; set; } = ".termforge/config.json";
+
+    public IReadOnlyList<string> EnabledModules { get; set; } = new List<string> { "proxy" };
+
+    public string ModuleStatePath { get; set; } = ".termforge/modules";
+
+    public string RootPath { get; set; } = "termforge";
+
+    public ProxyConfigSnapshot ReadProxyConfig()
+    {
+        return _snapshot;
     }
 
-    [Fact]
-    public void CommandEnvelope_defaults_to_expected_schema_version()
+    public void WriteProxyConfig(ProxyConfigSnapshot snapshot)
     {
-        var envelope = new TermForge.Contracts.CommandEnvelope<string>(
-            Command: "status",
-            Status: "PASS",
-            GeneratedAt: "2026-04-11 00:00:00",
-            Warnings: [],
-            Errors: [],
-            Payload: "ok");
+        _snapshot = snapshot;
+    }
 
-        Assert.Equal("2026-04-11", envelope.SchemaVersion);
+    public string GetRootPath()
+    {
+        return RootPath;
+    }
+
+    public string GetConfigPath()
+    {
+        return ConfigPath;
+    }
+
+    public string GetModuleStatePath()
+    {
+        return ModuleStatePath;
+    }
+
+    public IReadOnlyList<string> GetEnabledModules()
+    {
+        return EnabledModules;
     }
 }
