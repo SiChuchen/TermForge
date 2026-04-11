@@ -2,7 +2,7 @@
 
 `TermForge` 是一套面向 Windows shell 的受管终端运行时。它的目标不是替代 `Windows Terminal` 本体，而是把 PowerShell、VS Code PowerShell、CMD/Clink 这一层的启动入口、主题、代理和诊断能力整理成一个可安装、可回滚、可扩展的项目。
 
-默认管理 CLI 仍然叫 `scc`，并保留 `wtctl` 作为固定恢复入口。
+默认主命令是 `termforge`，但安装向导允许用户自定义；`wtctl` 始终保留为固定恢复入口。
 
 ## 适用场景
 
@@ -16,10 +16,10 @@
 - 交互式安装器：`install.cmd` / `install.ps1`
 - 卸载与回滚：`uninstall.ps1`
 - 受管 profile 注入，不覆盖用户整个 profile
-- 动态主命令，默认 `scc`
+- 动态主命令，默认 `termforge`
 - 固定恢复入口 `wtctl`
 - `proxy` / `theme` 两个基础模块
-- `scc doctor` 诊断输出与 `verify.ps1` smoke test
+- `termforge doctor` 诊断输出与 `verify.ps1` smoke test
 - CMD + Clink + Oh My Posh 集成
 - Nerd Font 安装与 Windows Terminal / VS Code 字体写入
 - 本地回环默认代理绕过：`127.0.0.1,localhost,::1`
@@ -41,7 +41,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 安装完成后，新开的终端会话里可以直接验证：
 
 ```powershell
-scc doctor
+termforge doctor
 wtctl doctor
 ```
 
@@ -68,14 +68,32 @@ TermForge 的运行时分成三层：
 
 如果本机已经存在旧版 `windows-terminal` 安装目录，安装器和卸载器会优先兼容已有路径与旧的受管 block 标记，避免升级时留下重复注入。
 
+## 安装向导行为
+
+安装脚本会按步骤询问真实需求，而不是默认把所有组件都装上：
+
+1. 选择安装目录和主命令名
+2. 选择要集成的宿主：PowerShell、VS Code PowerShell、CMD
+3. 选择是否会在 Windows Terminal 中使用
+4. 处理依赖：`oh-my-posh` 为必需项；`Windows Terminal` 只在你选择使用它时才参与安装
+5. 配置主题、字体和代理
+6. 部署运行时并执行 smoke test
+
+说明：
+
+- 默认主命令是 `termforge`，你可以在安装时换成别的名字
+- `wtctl` 不随用户改名，用来保留恢复入口
+- 如果你只在 VS Code 里使用，可以关闭 Windows Terminal 和 CMD 相关选项
+- 代理默认关闭，只有在你确认需要时才会要求填写地址
+
 ## 核心命令
 
 ```powershell
-scc list
-scc doctor
-scc doctor fancy
-scc doctor json
-scc help proxy
+termforge list
+termforge doctor
+termforge doctor fancy
+termforge doctor json
+termforge help proxy
 proxy
 proxy bypass add 127.0.0.1 localhost host.docker.internal
 posh
@@ -86,10 +104,24 @@ poshs <theme>
 
 说明：
 
-- `scc` 是默认主命令，可在安装时修改
+- `termforge` 是默认主命令，可在安装时修改
 - `wtctl` 始终保留为恢复入口
 - `proxy bypass add` 会把目标追加到 `proxy.noProxy`
 - 当 `proxy.enabled = true` 时，新增绕过项会立即同步到当前会话的 `no_proxy/NO_PROXY`
+
+## 代理配置
+
+代理默认关闭。安装向导只有在你选择启用代理时，才会继续询问以下字段：
+
+- `HTTP` 代理地址，例如 `http://127.0.0.1:7890`
+- `HTTPS` 代理地址，留空时复用 `HTTP`
+- `NO_PROXY`，默认值是 `127.0.0.1,localhost,::1`
+
+推荐做法：
+
+- 如果你不确定是否需要代理，就保持关闭
+- 如果你需要公司代理或本地代理，再在安装时启用
+- 本地服务、Docker 桥接地址、局域网直连目标，可以用 `proxy bypass add <host>` 追加到 `NO_PROXY`
 
 ## 配置模型
 
@@ -107,7 +139,7 @@ poshs <theme>
     }
   },
   "cli": {
-    "commandName": "scc"
+    "commandName": "termforge"
   },
   "cmd": {
     "enabled": true,
@@ -160,10 +192,10 @@ pwsh -NoProfile -File .\verify.ps1
 运行态验证：
 
 ```powershell
-scc doctor
-scc doctor fancy
-scc doctor verbose
-scc doctor json
+termforge doctor
+termforge doctor fancy
+termforge doctor verbose
+termforge doctor json
 ```
 
 说明：

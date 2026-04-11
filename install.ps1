@@ -41,6 +41,19 @@ function Write-SccInstallWarn {
     Write-Host "[install] $Message" -ForegroundColor Yellow
 }
 
+function Write-SccInstallSection {
+    param(
+        [Parameter(Mandatory)][string]$Title,
+        [string[]]$Notes = @()
+    )
+
+    Write-Host ""
+    Write-Host $Title -ForegroundColor Cyan
+    foreach ($note in $Notes) {
+        Write-Host "  $note" -ForegroundColor DarkGray
+    }
+}
+
 function Read-SccInstallText {
     param(
         [Parameter(Mandatory)][string]$Prompt,
@@ -103,10 +116,14 @@ function Test-SccInstallCommandName {
 }
 
 function Read-SccInstallCommandName {
-    param([string]$Default = "scc")
+    param([string]$Default = "termforge")
 
     while ($true) {
         $value = Read-SccInstallText -Prompt "主命令名" -Default $Default
+        if ($value -eq "wtctl") {
+            Write-SccInstallWarn "wtctl 是保留恢复入口，请选择其他主命令名。"
+            continue
+        }
         if (Test-SccInstallCommandName -Name $value) {
             return $value
         }
@@ -134,6 +151,27 @@ function Get-SccManagedProfileTargets {
     )
 }
 
+function Get-SccCommandSource {
+    param([Parameter(Mandatory)][string]$CommandName)
+
+    $command = Get-Command $CommandName -ErrorAction SilentlyContinue
+    if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+        return $command.Source
+    }
+
+    try {
+        $candidate = & where.exe $CommandName 2>$null |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path $_) } |
+            Select-Object -First 1
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            return $candidate
+        }
+    } catch {
+    }
+
+    return $null
+}
+
 function Ensure-SccDependency {
     param(
         [Parameter(Mandatory)][string]$CommandName,
@@ -141,7 +179,7 @@ function Ensure-SccDependency {
         [Parameter(Mandatory)][string]$FriendlyName
     )
 
-    if (Get-Command $CommandName -ErrorAction SilentlyContinue) {
+    if (Get-SccCommandSource -CommandName $CommandName) {
         Write-SccInstallStep "$FriendlyName 已存在。"
         return $true
     }
@@ -159,13 +197,34 @@ function Ensure-SccDependency {
     Write-SccInstallStep "正在通过 winget 安装 $FriendlyName ..."
     & winget install --id $WingetId --exact --source winget --accept-source-agreements --accept-package-agreements
 
-    if (Get-Command $CommandName -ErrorAction SilentlyContinue) {
+    if (Get-SccCommandSource -CommandName $CommandName) {
         Write-SccInstallStep "$FriendlyName 安装完成。"
         return $true
     }
 
     Write-SccInstallWarn "$FriendlyName 安装命令已执行，但当前会话尚未检测到 $CommandName。安装完成后请重新打开终端。"
     return $false
+}
+
+function Ensure-SccRequiredDependency {
+    param(
+        [Parameter(Mandatory)][string]$CommandName,
+        [Parameter(Mandatory)][string]$WingetId,
+        [Parameter(Mandatory)][string]$FriendlyName,
+        [string]$Reason = ""
+    )
+
+    if (Ensure-SccDependency -CommandName $CommandName -WingetId $WingetId -FriendlyName $FriendlyName) {
+        return
+    }
+
+    $reasonText = if ([string]::IsNullOrWhiteSpace($Reason)) {
+        ""
+    } else {
+        " 原因: $Reason"
+    }
+
+    throw "缺少必需依赖 $FriendlyName，安装无法继续。$reasonText"
 }
 
 function Find-SccClinkExecutable {
@@ -193,12 +252,7 @@ function Find-SccClinkExecutable {
 }
 
 function Get-SccOhMyPoshExecutable {
-    $command = Get-Command oh-my-posh -ErrorAction SilentlyContinue
-    if ($null -eq $command) {
-        return $null
-    }
-
-    return $command.Source
+    return (Get-SccCommandSource -CommandName "oh-my-posh")
 }
 
 function Copy-SccRuntimeFile {
@@ -656,6 +710,67 @@ function New-SccModuleState {
     }
 }
 
+function Read-SccInstallHostPlan {
+    Write-SccInstallSection -Title "Step 2/6 - 选择使用场景" -Notes @(
+        "按你实际要用的宿主选择即可，不需要的组件不会被强推。",
+        "如果你只在 VS Code 里使用，可以关闭 Windows Terminal 和 CMD 集成。"
+    )
+
+    while ($true) {
+        $managePowerShellProfile = Read-SccInstallBool -Prompt "是否托管 PowerShell profile" -Default $true
+        $manageVsCodeProfile = Read-SccInstallBool -Prompt "是否托管 VS Code PowerShell profile" -Default $true
+        $enableCmdHost = Read-SccInstallBool -Prompt "是否为 CMD 配置 Clink + Oh My Posh 提示符" -Default $false
+
+        if ($managePowerShellProfile -or $manageVsCodeProfile -or $enableCmdHost) {
+            $useWindowsTerminal = Read-SccInstallBool -Prompt "是否计划在 Windows Terminal 中使用 TermForge" -Default ($managePowerShellProfile -or $enableCmdHost)
+            return [pscustomobject]@{
+                ManagePowerShellProfile = $managePowerShellProfile
+                ManageVsCodeProfile     = $manageVsCodeProfile
+                EnableCmdHost           = $enableCmdHost
+                UseWindowsTerminal      = $useWindowsTerminal
+            }
+        }
+
+        Write-SccInstallWarn "请至少启用一种宿主：PowerShell、VS Code PowerShell 或 CMD。"
+    }
+}
+
+function Read-SccInstallProxyConfig {
+    Write-SccInstallSection -Title "Step 4/6 - 代理设置" -Notes @(
+        "代理默认关闭。只有在你确实需要通过公司代理或本地代理访问网络时才启用。",
+        "HTTP/HTTPS 示例: http://127.0.0.1:7890",
+        "NO_PROXY 默认保留 127.0.0.1,localhost,::1，避免本地回环流量走代理。"
+    )
+
+    $configureProxy = Read-SccInstallBool -Prompt "是否启用代理" -Default $false
+    if (-not $configureProxy) {
+        return [pscustomobject]@{
+            Enabled  = $false
+            Http     = ""
+            Https    = ""
+            NoProxy  = "127.0.0.1,localhost,::1"
+        }
+    }
+
+    while ($true) {
+        $httpProxy = Read-SccInstallText -Prompt "HTTP 代理地址" -Default ""
+        $httpsProxy = Read-SccInstallText -Prompt "HTTPS 代理地址(留空则复用 HTTP)" -Default ""
+
+        if ([string]::IsNullOrWhiteSpace($httpProxy) -and [string]::IsNullOrWhiteSpace($httpsProxy)) {
+            Write-SccInstallWarn "代理已启用时，HTTP 或 HTTPS 至少要填写一个。"
+            continue
+        }
+
+        $noProxy = Read-SccInstallText -Prompt "NO_PROXY(逗号分隔，本地回环建议保留)" -Default "127.0.0.1,localhost,::1"
+        return [pscustomobject]@{
+            Enabled = $true
+            Http    = $httpProxy
+            Https   = $httpsProxy
+            NoProxy = $noProxy
+        }
+    }
+}
+
 $sourceRoot = $PSScriptRoot
 $installRoot = [System.IO.Path]::GetFullPath($InstallRoot)
 
@@ -663,46 +778,73 @@ Write-Host ""
 Write-Host "TermForge interactive installer" -ForegroundColor Cyan
 Write-Host "Source : $sourceRoot"
 Write-Host "Target : $installRoot"
+Write-Host "默认主命令是 termforge；你可以在安装过程中改成别的名字。" -ForegroundColor DarkGray
+Write-Host "固定恢复入口始终是 wtctl；代理默认关闭，需要时再按向导填写。" -ForegroundColor DarkGray
 Write-Host ""
 
+Write-SccInstallSection -Title "Step 1/6 - 基本设置"
 $installRoot = [System.IO.Path]::GetFullPath((Read-SccInstallText -Prompt "安装目录" -Default $installRoot))
-$commandName = Read-SccInstallCommandName -Default "scc"
+$commandName = Read-SccInstallCommandName -Default "termforge"
 $addToPath = Read-SccInstallBool -Prompt "是否将安装目录加入用户 PATH（便于从 cmd / PowerShell 直接执行命令）" -Default $true
-$managePowerShellProfile = Read-SccInstallBool -Prompt "是否托管 PowerShell profile" -Default $true
-$manageVsCodeProfile = Read-SccInstallBool -Prompt "是否托管 VS Code PowerShell profile" -Default $true
-$enableCmdHost = Read-SccInstallBool -Prompt "是否为 CMD 配置 Clink + Oh My Posh 提示符" -Default $true
-$themeChoice = Read-SccInstallText -Prompt "默认主题名" -Default "termforge"
-$configureProxy = Read-SccInstallBool -Prompt "是否启用代理" -Default $false
-$httpProxy = ""
-$httpsProxy = ""
-$noProxy = "127.0.0.1,localhost,::1"
 
-if ($configureProxy) {
-    $httpProxy = Read-SccInstallText -Prompt "HTTP 代理地址" -Default ""
-    $httpsProxy = Read-SccInstallText -Prompt "HTTPS 代理地址(留空则复用 HTTP)" -Default ""
-    $noProxy = Read-SccInstallText -Prompt "NO_PROXY(可选，逗号分隔)" -Default "127.0.0.1,localhost,::1"
+$hostPlan = Read-SccInstallHostPlan
+$managePowerShellProfile = [bool]$hostPlan.ManagePowerShellProfile
+$manageVsCodeProfile = [bool]$hostPlan.ManageVsCodeProfile
+$enableCmdHost = [bool]$hostPlan.EnableCmdHost
+$useWindowsTerminal = [bool]$hostPlan.UseWindowsTerminal
+
+Write-SccInstallSection -Title "Step 3/6 - 依赖与主题" -Notes @(
+    "Oh My Posh 是 TermForge 的必需依赖，缺失时会尝试自动安装。",
+    "Windows Terminal 只会在你选择要用它时才会参与安装/配置。"
+)
+
+$themeChoice = Read-SccInstallText -Prompt "默认主题名" -Default "termforge"
+$configureFonts = Read-SccInstallBool -Prompt "是否自动安装 Nerd Font 并配置所选宿主的终端字体" -Default $true
+if ($configureFonts) {
+    $fontFace = Read-SccInstallText -Prompt "字体名称" -Default "MesloLGM Nerd Font"
+    $fontSize = Read-SccInstallInt -Prompt "字体大小" -Default 12
+} else {
+    $fontFace = "MesloLGM Nerd Font"
+    $fontSize = 12
 }
 
-$configureFonts = Read-SccInstallBool -Prompt "是否自动安装 Nerd Font 并配置终端字体" -Default $true
-$fontFace = Read-SccInstallText -Prompt "字体名称" -Default "MesloLGM Nerd Font"
-$fontSize = Read-SccInstallInt -Prompt "字体大小" -Default 12
-
-$shouldInstallPowerShell = Read-SccInstallBool -Prompt "若缺少 pwsh，是否自动安装 PowerShell 7" -Default $true
-$shouldInstallOhMyPosh = Read-SccInstallBool -Prompt "若缺少 oh-my-posh，是否自动安装" -Default $true
-$shouldInstallWindowsTerminal = Read-SccInstallBool -Prompt "若缺少 Windows Terminal，是否自动安装" -Default $true
+if ($managePowerShellProfile -or $manageVsCodeProfile) {
+    $shouldInstallPowerShell = Read-SccInstallBool -Prompt "若缺少 pwsh，是否自动安装 PowerShell 7（推荐，用于 PowerShell / VS Code）" -Default $true
+} else {
+    $shouldInstallPowerShell = $false
+}
 
 if ($shouldInstallPowerShell) {
     [void](Ensure-SccDependency -CommandName "pwsh" -WingetId "Microsoft.PowerShell" -FriendlyName "PowerShell 7")
+} elseif ($managePowerShellProfile -or $manageVsCodeProfile) {
+    Write-SccInstallWarn "你未选择自动安装 PowerShell 7；如果目标环境没有 pwsh，运行时会跳过部分 smoke test。"
 }
 
-if ($shouldInstallOhMyPosh) {
-    [void](Ensure-SccDependency -CommandName "oh-my-posh" -WingetId "JanDeDobbeleer.OhMyPosh" -FriendlyName "Oh My Posh")
+Ensure-SccRequiredDependency -CommandName "oh-my-posh" -WingetId "JanDeDobbeleer.OhMyPosh" -FriendlyName "Oh My Posh" -Reason "主题初始化、PowerShell 提示符和 CMD/Clink 集成都依赖它。"
+
+if ($useWindowsTerminal) {
+    $shouldInstallWindowsTerminal = Read-SccInstallBool -Prompt "若缺少 Windows Terminal，是否自动安装" -Default $true
+} else {
+    $shouldInstallWindowsTerminal = $false
 }
 
 if ($shouldInstallWindowsTerminal) {
     [void](Ensure-SccDependency -CommandName "wt" -WingetId "Microsoft.WindowsTerminal" -FriendlyName "Windows Terminal")
+} elseif ($useWindowsTerminal) {
+    Write-SccInstallWarn "你选择了 Windows Terminal 场景，但未启用自动安装；如果本机没有 Windows Terminal，相关字体配置会失败。"
 }
 
+if ($configureFonts) {
+    Write-SccInstallWarn "若字体安装完成但当前终端未立即生效，通常只需要重开宿主终端。"
+}
+
+$proxyConfig = Read-SccInstallProxyConfig
+$configureProxy = [bool]$proxyConfig.Enabled
+$httpProxy = $proxyConfig.Http
+$httpsProxy = $proxyConfig.Https
+$noProxy = $proxyConfig.NoProxy
+
+Write-SccInstallSection -Title "Step 5/6 - 部署运行时"
 Write-SccInstallStep "正在部署运行时文件 ..."
 if (-not (Test-Path $installRoot)) {
     New-Item -Path $installRoot -ItemType Directory -Force | Out-Null
@@ -743,11 +885,15 @@ $activeThemePath = Join-Path $themeDirectory "active.omp.json"
 
 if ($configureFonts) {
     [void](Install-SccNerdFont -FontToken "meslo")
-    $windowsTerminalSettings = Set-SccWindowsTerminalFont -FontFace $fontFace -FontSize $fontSize
-    $vsCodeSettings = Set-SccVsCodeTerminalFont -FontFace $fontFace -FontSize $fontSize
-    Write-SccInstallStep "Windows Terminal 设置文件: $windowsTerminalSettings"
-    foreach ($path in $vsCodeSettings) {
-        Write-SccInstallStep "VS Code 设置文件: $path"
+    if ($useWindowsTerminal) {
+        $windowsTerminalSettings = Set-SccWindowsTerminalFont -FontFace $fontFace -FontSize $fontSize
+        Write-SccInstallStep "Windows Terminal 设置文件: $windowsTerminalSettings"
+    }
+    if ($manageVsCodeProfile) {
+        $vsCodeSettings = Set-SccVsCodeTerminalFont -FontFace $fontFace -FontSize $fontSize
+        foreach ($path in $vsCodeSettings) {
+            Write-SccInstallStep "VS Code 设置文件: $path"
+        }
     }
 }
 
@@ -805,16 +951,26 @@ Write-Host "Install Summary" -ForegroundColor Cyan
 Write-Host "Root         : $installRoot"
 Write-Host "Command      : $commandName"
 Write-Host "Fallback     : wtctl"
+Write-Host "PowerShell   : $managePowerShellProfile"
+Write-Host "VS Code      : $manageVsCodeProfile"
+Write-Host "WindowsTerm  : $useWindowsTerminal"
 Write-Host "Theme        : $effectiveThemeName"
 Write-Host "CMD Host     : $($cmdHost.Enabled)"
 Write-Host "Font         : $fontFace ($fontSize)"
 Write-Host "Proxy Enabled: $configureProxy"
+if ($configureProxy) {
+    Write-Host "HTTP Proxy   : $httpProxy"
+    Write-Host "HTTPS Proxy  : $(if ([string]::IsNullOrWhiteSpace($httpsProxy)) { '(复用 HTTP)' } else { $httpsProxy })"
+    Write-Host "NO_PROXY     : $noProxy"
+}
 Write-Host ""
 
 if (-not $SkipVerification -and (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+    Write-SccInstallSection -Title "Step 6/6 - 运行验证"
     Write-SccInstallStep "运行安装后的 smoke test ..."
     & pwsh -NoLogo -NoProfile -File (Join-Path $installRoot "verify.ps1")
 } elseif (-not $SkipVerification) {
+    Write-SccInstallSection -Title "Step 6/6 - 运行验证"
     Write-SccInstallWarn "当前会话未检测到 pwsh，已跳过 smoke test。"
 }
 

@@ -161,7 +161,7 @@ function Get-SccDefaultConfig {
             }
         }
         cli = [pscustomobject][ordered]@{
-            commandName = "scc"
+            commandName = "termforge"
         }
         cmd = [pscustomobject][ordered]@{
             enabled     = $false

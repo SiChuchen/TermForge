@@ -1,6 +1,6 @@
 # SCC 模块开发规范 (MODULE_GUIDE)
 
-本目录是 `TermForge` 的 PowerShell 运行时工作区。默认管理 CLI 仍然叫 `scc`，目标是让 profile、模块状态和业务模块都通过统一的 bootstrap 启动，并且在单模块加载时也能正常工作。
+本目录是 `TermForge` 的 PowerShell 运行时工作区。默认管理 CLI 叫 `termforge`，但安装时允许用户改名；内部始终保留 `wtctl` 作为恢复入口。目标是让 profile、模块状态和业务模块都通过统一的 bootstrap 启动，并且在单模块加载时也能正常工作。
 
 ## 1. 目录结构
 
@@ -15,7 +15,7 @@ PowerShell/
   ├── MODULE_GUIDE.md                   (开发指南)
   └── modules/
       ├── common.ps1                    (公共函数：路径、JSON、帮助注册、模块发现)
-      ├── manager.ps1                   (核心主控模块：提供可配置主命令，默认 scc)
+      ├── manager.ps1                   (核心主控模块：提供可配置主命令，默认 termforge)
       ├── proxy.ps1                     (业务模块示例：代理配置)
       ├── theme.ps1                     (业务模块示例：主题控制)
       └── 你的新模块.ps1                (后续新增模块)
@@ -55,7 +55,7 @@ PowerShell/
 重新加载当前 profile，便于立即验证配置变更。
 
 `<主命令> help <模块名|命令名>`
-查看模块级或命令级帮助，例如 `scc help theme`、`scc help posht`；如果用户把主命令改名，也可以始终使用 `wtctl help ...`。
+查看模块级或命令级帮助，例如 `termforge help theme`、`termforge help posht`；如果用户把主命令改名，也可以始终使用 `wtctl help ...`。
 
 `proxy`
 查看当前代理配置、`NO_PROXY` 与当前终端环境变量。

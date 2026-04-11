@@ -43,7 +43,7 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 
 当前策略：
 
-- 默认主命令为 `scc`
+- 默认主命令为 `termforge`
 - 固定保留 `wtctl` 作为恢复入口
 - 启动时动态把主命令和 `wtctl` 绑定到同一套管理函数
 
@@ -78,6 +78,7 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 
 设计原则：
 
+- 默认主命令应该可自定义，但默认值必须稳定且有产品语义，因此选 `termforge`
 - 代理默认关闭
 - 代理的默认绕过列表至少应包含 `127.0.0.1,localhost,::1`，避免本地回环流量被错误送进代理
 - 主题默认开启
@@ -117,18 +118,19 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 
 `install.ps1` 负责：
 
-1. 交互式收集安装选项
-2. 检测并可选安装 `pwsh`
-3. 检测并可选安装 `oh-my-posh`
-4. 检测并可选安装 `Windows Terminal`
-5. 检测并可选安装 `Clink`
-6. 安装 Nerd Font，并写入 Windows Terminal / VS Code 字体设置
-7. 将运行时复制到受管目录
-8. 生成 `scc.cmd` / `wtctl.cmd` 包装器，并可选加入用户 PATH
-9. 写入 `scc.config.json` 和 `module_state.json`
-10. 给用户真实 profile 插入受管 block
-11. 配置 Clink script 和 autorun
-12. 运行 `verify.ps1` 做安装后 smoke test
+1. 交互式收集安装目录、主命令名和宿主使用场景
+2. 让用户明确选择是否托管 PowerShell、VS Code PowerShell、CMD
+3. 让用户明确选择是否真的需要 Windows Terminal 场景
+4. 将 `oh-my-posh` 视为必需依赖，缺失时自动安装或明确失败退出
+5. 按场景决定是否提示安装 `pwsh`、`Windows Terminal`、`Clink`
+6. 明确提示代理默认关闭，只在用户确认需要时才收集 HTTP / HTTPS / NO_PROXY
+7. 安装 Nerd Font，并按已选宿主写入 Windows Terminal / VS Code 字体设置
+8. 将运行时复制到受管目录
+9. 生成 `<主命令>.cmd` / `wtctl.cmd` 包装器，并可选加入用户 PATH
+10. 写入 `scc.config.json` 和 `module_state.json`
+11. 给用户真实 profile 插入受管 block
+12. 配置 Clink script 和 autorun
+13. 运行 `verify.ps1` 做安装后 smoke test
 
 `uninstall.ps1` 负责：
 
@@ -153,6 +155,14 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 **变更理由**: 原名称过于接近 Microsoft `Windows Terminal` 本体，难以区分“宿主终端”和“运行时/安装框架”这两个概念。`TermForge` 更准确表达项目定位。
 
 **影响范围**: `install.ps1`、`install.cmd`、`uninstall.ps1`、`modules/common.ps1`、`modules/theme.ps1`、`verify.ps1`、README、DESIGN、MODULE_GUIDE、主题文件。
+
+### 2026-04-11 - 安装向导按用户场景裁剪依赖与配置
+
+**变更内容**: 安装器改为按宿主场景逐步询问用户需求；默认主命令改为 `termforge` 但允许自定义；`oh-my-posh` 改为必需依赖；`Windows Terminal` 改为仅在用户选择该宿主时才参与安装；代理默认关闭，但在启用时给出清晰的 HTTP/HTTPS/NO_PROXY 配置说明。
+
+**变更理由**: 终端宿主和网络环境差异很大，安装器不能假设所有用户都需要同一组组件。向导必须按实际使用场景裁剪依赖和配置，才能保证兼容性和可理解性。
+
+**影响范围**: `install.ps1`、`modules/common.ps1`、README、DESIGN、MODULE_GUIDE、VM 测试说明。
 
 ### 2026-04-11 - 增加 proxy bypass add 与回环默认绕过
 

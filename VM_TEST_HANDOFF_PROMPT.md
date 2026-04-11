@@ -14,7 +14,7 @@
    - uninstall.ps1
 3. 已支持：
    - PowerShell / VSCode PowerShell 受管 profile 注入
-   - 动态主命令，默认 scc
+   - 动态主命令，默认 termforge
    - 固定恢复入口 wtctl
    - CMD + Clink + Oh My Posh 集成
    - Nerd Font 安装
@@ -55,9 +55,9 @@
    - 缺少依赖时是否会正确提示/安装 pwsh、oh-my-posh、Windows Terminal、Clink
    - 失败时窗口是否会停住
    - 安装目录是否加入用户 PATH
-   - 是否生成 scc.cmd 和 wtctl.cmd
+   - 是否生成 `<主命令>.cmd` 和 wtctl.cmd
    - 新开的 cmd / PowerShell / Windows Terminal 中是否能运行：
-     - scc doctor
+     - termforge doctor
      - wtctl doctor
    - theme 是否默认启用
    - proxy 是否默认不生效
