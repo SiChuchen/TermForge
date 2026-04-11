@@ -2,7 +2,4 @@
   <ItemGroup>
     <ProjectReference Include="..\TermForge.Contracts\TermForge.Contracts.csproj" />
   </ItemGroup>
-  <PropertyGroup>
-    <AssemblyName>TermForge.Platform</AssemblyName>
-  </PropertyGroup>
 </Project>
