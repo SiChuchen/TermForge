@@ -10,6 +10,7 @@
 1. 这个项目已经不是单纯的 PowerShell profile 目录了，而是一个可安装项目。
 2. 已有交互式安装器和卸载器：
    - install.cmd
+   - setup.ps1
    - install.ps1
    - uninstall.ps1
 3. 已支持：
@@ -21,6 +22,7 @@
    - Windows Terminal / VS Code 终端字体配置
    - 内置默认主题 + active.omp.json 共享主题文件
    - proxy 默认关闭，theme 默认开启
+   - setup.ps1 会先做环境预检，再转入 install.ps1
 4. 已新增统一命令入口：
    - launcher.ps1
 5. 仓库内验证已通过：
@@ -35,6 +37,7 @@
    - README.md
    - DESIGN.md
    - install.cmd
+   - setup.ps1
    - install.ps1
    - uninstall.ps1
    - launcher.ps1
@@ -49,9 +52,11 @@
    - pwsh -NoLogo -NoProfile -File .\verify.ps1
 3. 然后做真实安装测试，优先覆盖这些场景：
    - 从资源管理器双击 install.cmd
+   - 在 PowerShell 中先运行 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
    - 在 cmd.exe 中运行 install.cmd
    - 在 PowerShell 中运行 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 4. 安装测试时重点检查：
+   - setup.ps1 的环境预检是否准确，阻塞项和警告项是否合理
    - 缺少依赖时是否会正确提示/安装 pwsh、oh-my-posh、Windows Terminal、Clink
    - 失败时窗口是否会停住
    - 安装目录是否加入用户 PATH

@@ -1,6 +1,11 @@
 @echo off
 setlocal
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
+set "TF_PWSH=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if exist "%TF_PWSH%" (
+    "%TF_PWSH%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup.ps1" %*
+) else (
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup.ps1" %*
+)
 set "WT_INSTALL_EXIT=%ERRORLEVEL%"
 if not "%WT_INSTALL_EXIT%"=="0" (
     echo.

@@ -37,6 +37,25 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 
 来完成命令入口和提示符初始化。
 
+## 安装入口模型
+
+安装流程分成两层：
+
+1. `setup.ps1`
+2. `install.ps1`
+
+其中：
+
+- `setup.ps1` 负责环境预检、阻塞项判断和安装分发
+- `install.ps1` 负责真正的交互式安装流程
+- `install.cmd` 只是双击友好的外壳，默认调用 `setup.ps1`
+
+这样设计的原因：
+
+- 不需要维护多套几乎重复的安装脚本
+- 可以在“纯净 Windows 10 / 11”环境里先明确告诉用户缺什么
+- 可以把“阻塞项”和“可选项”分开处理，避免用户走到中途才失败
+
 ## 主命令模型
 
 内部管理函数固定为 `Invoke-SccManagerCommand`，外部暴露的主命令来自 `cli.commandName`。
@@ -132,6 +151,15 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 12. 配置 Clink script 和 autorun
 13. 运行 `verify.ps1` 做安装后 smoke test
 
+`setup.ps1` 负责：
+
+1. 检测是否为 Windows 10 / 11
+2. 检测 `LOCALAPPDATA` 是否可写
+3. 检测 `winget`、`pwsh`、`oh-my-posh`、`Windows Terminal`、`Clink`、`VS Code`
+4. 在缺少必需依赖且无法自动补齐时提前阻断
+5. 输出环境摘要与风险提示
+6. 再转入 `install.ps1`
+
 `uninstall.ps1` 负责：
 
 1. 清理 profile 注入 block
@@ -163,6 +191,14 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 **变更理由**: 终端宿主和网络环境差异很大，安装器不能假设所有用户都需要同一组组件。向导必须按实际使用场景裁剪依赖和配置，才能保证兼容性和可理解性。
 
 **影响范围**: `install.ps1`、`modules/common.ps1`、README、DESIGN、MODULE_GUIDE、VM 测试说明。
+
+### 2026-04-11 - 增加安装预检入口 setup.ps1
+
+**变更内容**: 新增 `setup.ps1` 作为环境预检入口，由 `install.cmd` 默认调用；预检会先检查 Windows 版本、写权限和关键依赖，再决定是否放行到 `install.ps1`。
+
+**变更理由**: 纯净 Windows 10 / 11 环境的差异主要在依赖是否存在、是否可自动安装，而不是需要多套完全不同的安装器。增加一层预检，比维护多套安装脚本更稳。
+
+**影响范围**: `setup.ps1`、`install.cmd`、`install.ps1`、README、DESIGN。
 
 ### 2026-04-11 - 增加 proxy bypass add 与回环默认绕过
 

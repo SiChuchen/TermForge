@@ -14,6 +14,7 @@
 ## 当前能力
 
 - 交互式安装器：`install.cmd` / `install.ps1`
+- 预检入口：`setup.ps1`
 - 卸载与回滚：`uninstall.ps1`
 - 受管 profile 注入，不覆盖用户整个 profile
 - 动态主命令，默认 `termforge`
@@ -35,7 +36,7 @@
 或：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
 安装完成后，新开的终端会话里可以直接验证：
@@ -72,12 +73,13 @@ TermForge 的运行时分成三层：
 
 安装脚本会按步骤询问真实需求，而不是默认把所有组件都装上：
 
-1. 选择安装目录和主命令名
-2. 选择要集成的宿主：PowerShell、VS Code PowerShell、CMD
-3. 选择是否会在 Windows Terminal 中使用
-4. 处理依赖：`oh-my-posh` 为必需项；`Windows Terminal` 只在你选择使用它时才参与安装
-5. 配置主题、字体和代理
-6. 部署运行时并执行 smoke test
+1. `setup.ps1` 先做环境预检
+2. 选择安装目录和主命令名
+3. 选择要集成的宿主：PowerShell、VS Code PowerShell、CMD
+4. 选择是否会在 Windows Terminal 中使用
+5. 处理依赖：`oh-my-posh` 为必需项；`Windows Terminal` 只在你选择使用它时才参与安装
+6. 配置主题、字体和代理
+7. 部署运行时并执行 smoke test
 
 说明：
 
@@ -85,6 +87,28 @@ TermForge 的运行时分成三层：
 - `wtctl` 不随用户改名，用来保留恢复入口
 - 如果你只在 VS Code 里使用，可以关闭 Windows Terminal 和 CMD 相关选项
 - 代理默认关闭，只有在你确认需要时才会要求填写地址
+- `setup.ps1` 会先检查 Windows 版本、`LOCALAPPDATA` 可写性、`winget`、`pwsh`、`oh-my-posh`、`wt`、`clink`、`VS Code` 等环境状态
+- 如果缺少 `oh-my-posh` 且又无法自动安装，预检会直接阻断，而不是让用户走到一半才失败
+
+## 兼容性结论
+
+如果用户是在一台“几乎没有额外工具”的 Windows 10/11 机器上安装，是否能直接用，取决于两件事：
+
+- 是否至少满足 Windows 10 / 11 基线
+- 是否能拿到 `oh-my-posh`
+
+当前策略是：
+
+- 纯净 Windows 11 且带 `winget` 的环境，通常可以直接从 `install.cmd` 开始安装
+- Windows 10/11 上如果没有 `winget`，但已经手动装过 `oh-my-posh`，也可以继续
+- 如果既没有 `winget`，也没有 `oh-my-posh`，安装器会在预检阶段直接停止，并告诉用户为什么不能继续
+
+这意味着我们不需要维护多套“Windows 10 安装器 / Windows 11 安装器 / VS Code 安装器”，而是采用：
+
+- 一层预检入口：`setup.ps1`
+- 一层主安装向导：`install.ps1`
+
+这种结构更容易维护，也更容易兼容不同宿主场景。
 
 ## 核心命令
 
@@ -169,6 +193,7 @@ poshs <theme>
 ## 仓库结构
 
 - `install.ps1` / `install.cmd`: 交互式安装入口
+- `setup.ps1`: 环境预检与安装分发入口
 - `uninstall.ps1`: 卸载与回滚
 - `launcher.ps1`: `scc.cmd` / `wtctl.cmd` 的统一入口
 - `bootstrap.ps1`: 统一启动入口

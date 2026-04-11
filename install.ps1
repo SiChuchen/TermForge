@@ -851,6 +851,7 @@ if (-not (Test-Path $installRoot)) {
 }
 
 foreach ($relativePath in @(
+    "setup.ps1",
     "bootstrap.ps1",
     "launcher.ps1",
     "Microsoft.PowerShell_profile.ps1",
