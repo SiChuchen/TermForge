@@ -57,6 +57,19 @@ public sealed class JsonConfigStore : IConfigStore
         return _moduleStatePath;
     }
 
+    public string GetRuntimeStatePath()
+    {
+        return Path.Combine(_rootPath, "state");
+    }
+
+    public string GetPrimaryCommandName()
+    {
+        var root = ReadJsonObject(_configPath);
+        var cli = root["cli"] as JsonObject;
+        var commandName = cli?["commandName"]?.GetValue<string>();
+        return string.IsNullOrWhiteSpace(commandName) ? "termforge" : commandName;
+    }
+
     public IReadOnlyList<string> GetEnabledModules()
     {
         var root = ReadJsonObject(_moduleStatePath);

@@ -6,7 +6,6 @@ namespace TermForge.Core.Services;
 public sealed class StatusService
 {
     private const string FallbackCommand = "wtctl";
-    private const string PrimaryCommand = "termforge";
     private readonly IConfigStore _configStore;
 
     public StatusService(IConfigStore configStore)
@@ -18,12 +17,12 @@ public sealed class StatusService
     {
         var payload = new StatusPayload(
             RootPath: _configStore.GetRootPath(),
-            PrimaryCommand: PrimaryCommand,
+            PrimaryCommand: _configStore.GetPrimaryCommandName(),
             FallbackCommand: FallbackCommand,
             EnabledModules: _configStore.GetEnabledModules(),
             ConfigPath: _configStore.GetConfigPath(),
             ModuleStatePath: _configStore.GetModuleStatePath(),
-            RuntimeStatePath: Path.Combine(_configStore.GetRootPath(), "state"));
+            RuntimeStatePath: _configStore.GetRuntimeStatePath());
 
         return new CommandEnvelope<StatusPayload>(
             Command: "status",
