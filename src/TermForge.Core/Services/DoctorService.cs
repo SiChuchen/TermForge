@@ -7,10 +7,12 @@ namespace TermForge.Core.Services;
 public sealed class DoctorService
 {
     private readonly IConfigStore _configStore;
+    private readonly string? _sharedPrimaryCommandName;
 
-    public DoctorService(IConfigStore configStore)
+    public DoctorService(IConfigStore configStore, string? sharedPrimaryCommandName = null)
     {
         _configStore = configStore;
+        _sharedPrimaryCommandName = sharedPrimaryCommandName;
     }
 
     public CommandEnvelope<DoctorPayload> BuildReport()
@@ -32,7 +34,7 @@ public sealed class DoctorService
 
         var payload = new DoctorPayload(
             RootPath: _configStore.GetRootPath(),
-            PrimaryCommandName: _configStore.GetPrimaryCommandName(),
+            PrimaryCommandName: ResolvePrimaryCommandName(),
             OverallStatus: "PASS",
             FailCount: 0,
             WarnCount: 0,
@@ -48,5 +50,12 @@ public sealed class DoctorService
             Warnings: [],
             Errors: [],
             Payload: payload);
+    }
+
+    private string ResolvePrimaryCommandName()
+    {
+        return string.IsNullOrWhiteSpace(_sharedPrimaryCommandName)
+            ? _configStore.GetPrimaryCommandName()
+            : _sharedPrimaryCommandName;
     }
 }

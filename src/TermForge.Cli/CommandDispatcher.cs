@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text.Json;
 using TermForge.Contracts;
 using TermForge.Core.Interfaces;
 using TermForge.Core.Services;
@@ -26,13 +28,13 @@ internal sealed class CommandDispatcher
     {
         if (args.Count == 2 && Is(args[0], "status") && Is(args[1], "--json"))
         {
-            return new StatusService(_configStore).BuildReport();
+            return new StatusService(_configStore, LoadSharedPrimaryCommandName()).BuildReport();
         }
 
 
         if (args.Count == 2 && Is(args[0], "doctor") && Is(args[1], "--json"))
         {
-            return new DoctorService(_configStore).BuildReport();
+            return new DoctorService(_configStore, LoadSharedPrimaryCommandName()).BuildReport();
         }
         if (args.Count >= 2 && Is(args[0], "proxy"))
         {
@@ -108,6 +110,79 @@ internal sealed class CommandDispatcher
     private ProxyWorkflowService CreateWorkflowService()
     {
         return new ProxyWorkflowService(_configStore, _planStore, _operationLedger, _environmentAdapter, _clock);
+    }
+
+    private string? LoadSharedPrimaryCommandName()
+    {
+        return TryLoadSharedEnvironmentFacts()?.PrimaryCommandName;
+    }
+
+    private SharedEnvironmentFactsBridgeResult? TryLoadSharedEnvironmentFacts()
+    {
+        foreach (var shellName in new[] { "pwsh", "powershell.exe" })
+        {
+            var facts = TryLoadSharedEnvironmentFacts(shellName);
+            if (facts is not null)
+            {
+                return facts;
+            }
+        }
+
+        return null;
+    }
+
+    private SharedEnvironmentFactsBridgeResult? TryLoadSharedEnvironmentFacts(string shellName)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = shellName,
+            Arguments = $"-NoLogo -NoProfile -Command \"{BuildSharedFactsScript()}\"",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = _configStore.GetRootPath()
+        };
+
+        try
+        {
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return null;
+            }
+
+            var output = process.StandardOutput.ReadToEnd();
+            _ = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(output))
+            {
+                return null;
+            }
+
+            return JsonSerializer.Deserialize<SharedEnvironmentFactsBridgeResult>(
+                output,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private string BuildSharedFactsScript()
+    {
+        var commonModulePath = Path.Combine(_configStore.GetRootPath(), "modules", "common.ps1")
+            .Replace("'", "''");
+
+        return string.Join(
+            "; ",
+            "$ErrorActionPreference = 'Stop'",
+            $". '{commonModulePath}'",
+            "$config = Get-SccConfig",
+            "$facts = Get-SccEnvironmentFacts",
+            "[pscustomobject][ordered]@{ PrimaryCommandName = Get-SccPrimaryCommandName -Config $config; Host = $facts.Host; Tools = @($facts.Tools); ProxyEnvironment = $facts.ProxyEnvironment; InstallHost = $facts.InstallHost } | ConvertTo-Json -Depth 6 -Compress");
     }
 
     private CommandEnvelope<TPayload> Envelope<TPayload>(string command, TPayload payload)
@@ -193,4 +268,11 @@ internal sealed class CommandDispatcher
             return DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         }
     }
+
+    private sealed record SharedEnvironmentFactsBridgeResult(
+        string PrimaryCommandName,
+        EnvironmentHostFacts Host,
+        IReadOnlyList<EnvironmentToolFact> Tools,
+        EnvironmentProxyFact ProxyEnvironment,
+        EnvironmentInstallHostFact InstallHost);
 }

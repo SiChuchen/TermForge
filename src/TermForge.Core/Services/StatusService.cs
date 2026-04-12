@@ -7,17 +7,19 @@ public sealed class StatusService
 {
     private const string FallbackCommand = "wtctl";
     private readonly IConfigStore _configStore;
+    private readonly string? _sharedPrimaryCommandName;
 
-    public StatusService(IConfigStore configStore)
+    public StatusService(IConfigStore configStore, string? sharedPrimaryCommandName = null)
     {
         _configStore = configStore;
+        _sharedPrimaryCommandName = sharedPrimaryCommandName;
     }
 
     public CommandEnvelope<StatusPayload> BuildReport()
     {
         var payload = new StatusPayload(
             RootPath: _configStore.GetRootPath(),
-            PrimaryCommand: _configStore.GetPrimaryCommandName(),
+            PrimaryCommand: ResolvePrimaryCommandName(),
             FallbackCommand: FallbackCommand,
             EnabledModules: _configStore.GetEnabledModules(),
             ConfigPath: _configStore.GetConfigPath(),
@@ -31,5 +33,12 @@ public sealed class StatusService
             Warnings: [],
             Errors: [],
             Payload: payload);
+    }
+
+    private string ResolvePrimaryCommandName()
+    {
+        return string.IsNullOrWhiteSpace(_sharedPrimaryCommandName)
+            ? _configStore.GetPrimaryCommandName()
+            : _sharedPrimaryCommandName;
     }
 }

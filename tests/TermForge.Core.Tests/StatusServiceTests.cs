@@ -28,6 +28,24 @@ public class StatusServiceTests
         Assert.Equal(@"E:\TermForge\state", result.Payload.RuntimeStatePath);
         Assert.Contains("proxy", result.Payload.EnabledModules);
     }
+
+    [Fact]
+    public void StatusService_uses_shared_environment_facts_for_runtime_command_name()
+    {
+        var store = new FakeConfigStore
+        {
+            RootPath = @"E:\TermForge",
+            ConfigPath = @"E:\TermForge\scc.config.json",
+            ModuleStatePath = @"E:\TermForge\module_state.json",
+            RuntimeStatePath = @"E:\TermForge\state",
+            PrimaryCommandName = "tfx"
+        };
+
+        var service = new TermForge.Core.Services.StatusService(store);
+        var result = service.BuildReport();
+
+        Assert.Equal("tfx", result.Payload.PrimaryCommand);
+    }
 }
 
 internal sealed class FakeConfigStore : IConfigStore
