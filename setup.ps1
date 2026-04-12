@@ -190,6 +190,17 @@ function Read-SccSetupContinue {
 }
 
 $setupReport = Get-SccSetupReport
+
+if ($Json) {
+    Write-Output 'setup report mode not implemented yet'
+    exit 0
+}
+
+if ($Report) {
+    Write-Output 'setup report mode not implemented yet'
+    exit 0
+}
+
 Show-SccSetupSummary -Report $setupReport
 
 $blockingIssues = @(Get-SccSetupBlockingIssues -Report $setupReport -SkipDependencyInstallFlag:$SkipDependencyInstall)
