@@ -40,4 +40,20 @@ Describe 'setup.ps1 report modes' {
         $output | Should Match 'Install readiness'
         $output | Should Not Match '继续进入安装向导吗'
     }
+
+    It 'derives setup JSON output from the shared environment facts' {
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        . (Join-Path $repoRoot 'modules\common.ps1')
+
+        $facts = Get-SccEnvironmentFacts
+        $json = & pwsh -NoLogo -NoProfile -File (Join-Path $repoRoot 'setup.ps1') --json | Out-String
+        $report = $json | ConvertFrom-Json
+        $sharedOhMyPosh = @($facts.Tools | Where-Object Name -eq 'oh-my-posh')[0]
+        $reportedOhMyPosh = @($report.Tools | Where-Object Name -eq 'oh-my-posh')[0]
+
+        $report.Environment.PowerShellVersion | Should Be $facts.Host.PowerShellVersion
+        $report.ProxyEnvironment.Enabled | Should Be $facts.ProxyEnvironment.Enabled
+        ($reportedOhMyPosh.PSObject.Properties.Name -contains 'CanAutoInstall') | Should Be $true
+        $reportedOhMyPosh.CanAutoInstall | Should Be $sharedOhMyPosh.CanAutoInstall
+    }
 }

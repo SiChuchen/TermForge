@@ -579,12 +579,40 @@ function Get-SccToolFacts {
         @{ Name = 'docker'; Required = $false }
     )
 
+    $toolPaths = @{}
     foreach ($toolSpec in $toolSpecs) {
-        $path = Get-SccSetupCommandSource -CommandName $toolSpec.Name
+        $toolPaths[$toolSpec.Name] = Get-SccSetupCommandSource -CommandName $toolSpec.Name
+    }
+
+    $wingetDetected = -not [string]::IsNullOrWhiteSpace($toolPaths['winget'])
+
+    foreach ($toolSpec in $toolSpecs) {
+        $path = $toolPaths[$toolSpec.Name]
         $detected = -not [string]::IsNullOrWhiteSpace($path)
-        $canAutoInstall = $toolSpec.Required -and -not $SkipDependencyInstallFlag -and ($toolSpec.Name -eq 'oh-my-posh') -and ($null -ne (Get-SccSetupCommandSource -CommandName 'winget')) -and $InstallHostFacts.IsAvailable
+        $canAutoInstall = (
+            $toolSpec.Required -and
+            -not $detected -and
+            -not $SkipDependencyInstallFlag -and
+            ($toolSpec.Name -eq 'oh-my-posh') -and
+            $wingetDetected -and
+            $InstallHostFacts.IsAvailable
+        )
         $status = if ($detected) { 'PASS' } elseif ($canAutoInstall) { 'WARN' } elseif ($toolSpec.Required) { 'FAIL' } else { 'WARN' }
-        $message = if ($detected) { $path } elseif ($canAutoInstall) { 'required but missing; can be installed automatically' } elseif ($toolSpec.Required) { 'required but missing' } else { 'optional but missing' }
+        $message = if ($detected) {
+            $path
+        } elseif ($toolSpec.Required -and $SkipDependencyInstallFlag) {
+            'required but missing; dependency install is skipped'
+        } elseif ($toolSpec.Required -and -not $wingetDetected) {
+            'required but missing; automatic install is unavailable'
+        } elseif ($toolSpec.Required -and -not $InstallHostFacts.IsAvailable) {
+            'required but missing; install host is unavailable'
+        } elseif ($canAutoInstall) {
+            'required but missing; can be installed automatically'
+        } elseif ($toolSpec.Required) {
+            'required but missing'
+        } else {
+            'optional but missing'
+        }
 
         [pscustomobject][ordered]@{
             Name = $toolSpec.Name
@@ -627,6 +655,127 @@ function Get-SccEnvironmentFacts {
         Tools = $toolFacts
         ProxyEnvironment = $proxyFacts
         InstallHost = $installHostFacts
+    }
+}
+
+function Get-SccSetupBlockingIssues {
+    param(
+        [Parameter(Mandatory)]$EnvironmentFacts,
+        [Parameter(Mandatory)][bool]$SkipDependencyInstallFlag
+    )
+
+    $issues = @()
+    $hostFacts = $EnvironmentFacts.Host
+    $installHostFacts = $EnvironmentFacts.InstallHost
+    $toolFacts = @($EnvironmentFacts.Tools)
+    $ohMyPoshFacts = @($toolFacts | Where-Object Name -eq 'oh-my-posh')[0]
+    $wingetFacts = @($toolFacts | Where-Object Name -eq 'winget')[0]
+    $osVersion = [version]'0.0'
+
+    if (-not [string]::IsNullOrWhiteSpace($hostFacts.OsVersion)) {
+        try {
+            $osVersion = [version]$hostFacts.OsVersion
+        } catch {
+            $osVersion = [version]'0.0'
+        }
+    }
+
+    $isSupportedWindows = $hostFacts.IsWindows -and $osVersion.Major -ge 10
+
+    if (-not $hostFacts.IsWindows) {
+        $issues += "当前系统不是 Windows，TermForge 目前只支持 Windows 10 / 11。"
+    } elseif (-not $isSupportedWindows) {
+        $issues += "当前系统版本低于 Windows 10，TermForge 不支持该环境。"
+    }
+
+    if (-not $hostFacts.CanWriteLocalAppData) {
+        $issues += "无法写入 LOCALAPPDATA，安装器无法创建默认安装目录。"
+    }
+
+    if ($null -ne $ohMyPoshFacts -and -not $ohMyPoshFacts.Detected) {
+        if ($SkipDependencyInstallFlag) {
+            $issues += "当前缺少 oh-my-posh，且你要求跳过依赖安装。TermForge 无法继续。"
+        } elseif ($null -eq $wingetFacts -or -not $wingetFacts.Detected) {
+            $issues += "当前缺少 oh-my-posh，且未检测到 winget，安装器无法自动补齐必需依赖。"
+        } elseif (-not $installHostFacts.IsAvailable) {
+            $issues += "当前缺少 oh-my-posh，且未找到可用的 PowerShell 宿主来启动 install.ps1。"
+        }
+    }
+
+    if (-not $installHostFacts.IsAvailable) {
+        $issues += "未找到可用的 PowerShell 宿主，无法启动 install.ps1。"
+    }
+
+    return @($issues)
+}
+
+function Get-SccSetupEnvironmentReport {
+    param(
+        [Parameter(Mandatory)]$EnvironmentFacts,
+        [bool]$SkipDependencyInstallFlag = $false
+    )
+
+    $tools = @($EnvironmentFacts.Tools)
+    $proxyEnvironment = $EnvironmentFacts.ProxyEnvironment
+    $blockingIssues = @(
+        Get-SccSetupBlockingIssues `
+            -EnvironmentFacts $EnvironmentFacts `
+            -SkipDependencyInstallFlag:$SkipDependencyInstallFlag
+    )
+    $warnings = @(
+        $tools |
+            Where-Object { $_.Status -eq 'WARN' } |
+            ForEach-Object { '{0}: {1}' -f $_.Name, $_.Message }
+    )
+
+    if ($proxyEnvironment.Status -eq 'WARN') {
+        $warnings += 'Proxy environment variables are enabled for this process.'
+    }
+
+    $wingetFacts = @($tools | Where-Object Name -eq 'winget')[0]
+    $ohMyPoshFacts = @($tools | Where-Object Name -eq 'oh-my-posh')[0]
+    $windowsTerminalFacts = @($tools | Where-Object Name -eq 'wt')[0]
+    $clinkFacts = @($tools | Where-Object Name -eq 'clink')[0]
+
+    [pscustomobject][ordered]@{
+        SchemaVersion    = '2026-04-12'
+        GeneratedAt      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        OverallStatus    = if ($blockingIssues.Count -gt 0) { 'FAIL' } elseif ($warnings.Count -gt 0) { 'WARN' } else { 'PASS' }
+        BlockingIssues   = @($blockingIssues)
+        Warnings         = @($warnings)
+        Environment      = [pscustomobject][ordered]@{
+            IsWindows            = $EnvironmentFacts.Host.IsWindows
+            OsVersion            = $EnvironmentFacts.Host.OsVersion
+            PowerShellEdition    = $EnvironmentFacts.Host.PowerShellEdition
+            PowerShellVersion    = $EnvironmentFacts.Host.PowerShellVersion
+            LocalAppData         = $EnvironmentFacts.Host.LocalAppData
+            DocumentsPath        = $EnvironmentFacts.Host.DocumentsPath
+            CanWriteLocalAppData = $EnvironmentFacts.Host.CanWriteLocalAppData
+        }
+        Tools            = @($tools)
+        ProxyEnvironment = $proxyEnvironment
+        InstallReadiness = [pscustomobject][ordered]@{
+            CanContinue               = ($blockingIssues.Count -eq 0)
+            RequiresDependencyInstall = @(
+                $tools |
+                    Where-Object {
+                        $_.Required -and
+                        -not $_.Detected -and
+                        $_.Status -eq 'WARN'
+                    }
+            ).Count -gt 0
+            BlockingIssueCount        = $blockingIssues.Count
+            WarningCount              = $warnings.Count
+            RecommendedInstallMode    = if (($null -eq $wingetFacts -or -not $wingetFacts.Detected) -and ($null -eq $ohMyPoshFacts -or -not $ohMyPoshFacts.Detected)) {
+                'manual-deps-required'
+            } elseif ($null -eq $windowsTerminalFacts -or -not $windowsTerminalFacts.Detected) {
+                'without-terminal'
+            } elseif ($null -eq $clinkFacts -or -not $clinkFacts.Detected) {
+                'without-cmd'
+            } else {
+                'full'
+            }
+        }
     }
 }
 
