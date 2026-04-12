@@ -46,7 +46,7 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 
 其中：
 
-- `setup.ps1` 负责环境预检、阻塞项判断和安装分发
+- `setup.ps1` 负责环境预检、JSON-first 环境报告、阻塞项判断和安装分发
 - `install.ps1` 负责真正的交互式安装流程
 - `install.cmd` 只是双击友好的外壳，默认调用 `setup.ps1`
 
@@ -55,6 +55,20 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 - 不需要维护多套几乎重复的安装脚本
 - 可以在“纯净 Windows 10 / 11”环境里先明确告诉用户缺什么
 - 可以把“阻塞项”和“可选项”分开处理，避免用户走到中途才失败
+
+`setup.ps1` 的预检模型已扩展为 JSON-first 环境报告。
+
+- 结构化报告是事实来源
+- 文本人类摘要由同一份报告渲染
+- 默认模式仍可继续进入 `install.ps1`
+- `--json` / `--report` 模式只做报告，不进入安装流程
+
+第一版环境报告的核心分段为：
+
+- `Environment`
+- `Tools`
+- `ProxyEnvironment`
+- `InstallReadiness`
 
 ## 控制面模型
 
@@ -187,10 +201,12 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 
 1. 检测是否为 Windows 10 / 11
 2. 检测 `LOCALAPPDATA` 是否可写
-3. 检测 `winget`、`pwsh`、`oh-my-posh`、`Windows Terminal`、`Clink`、`VS Code`
-4. 在缺少必需依赖且无法自动补齐时提前阻断
-5. 输出环境摘要与风险提示
-6. 再转入 `install.ps1`
+3. 生成统一的 report object，作为环境事实来源
+4. 检测 `winget`、`pwsh`、`oh-my-posh`、`Windows Terminal`、`Clink`、`VS Code`、`git`、`npm`、`pnpm`、`yarn`、`pip`、`uv`、`cargo`、`docker`
+5. 输出 `ProxyEnvironment` 与 `InstallReadiness` 等报告分段
+6. 在缺少必需依赖且无法自动补齐时提前阻断
+7. 默认模式输出环境摘要与风险提示后再转入 `install.ps1`
+8. `--json` / `--report` 模式只输出报告，不进入安装流程
 
 `uninstall.ps1` 负责：
 

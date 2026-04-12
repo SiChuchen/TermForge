@@ -81,7 +81,15 @@ PowerShell 继续保留为安装器、profile 注入和命令入口；`status --
 
 安装脚本会按步骤询问真实需求，而不是默认把所有组件都装上：
 
-1. `setup.ps1` 先做环境预检
+`setup.ps1` 现在同时承担“预检入口”和“环境报告入口”：
+
+- `./setup.ps1`：输出预检摘要，并在可继续时进入安装向导
+- `./setup.ps1 --json`：输出结构化环境报告，不进入安装向导
+- `./setup.ps1 --report`：输出完整文本环境报告，不进入安装向导
+
+安装脚本会按步骤询问真实需求，而不是默认把所有组件都装上：
+
+1. `setup.ps1` 先做环境预检或环境报告
 2. 选择安装目录和主命令名
 3. 选择要集成的宿主：PowerShell、VS Code PowerShell、CMD
 4. 选择是否会在 Windows Terminal 中使用
@@ -95,7 +103,8 @@ PowerShell 继续保留为安装器、profile 注入和命令入口；`status --
 - `wtctl` 不随用户改名，用来保留恢复入口
 - 如果你只在 VS Code 里使用，可以关闭 Windows Terminal 和 CMD 相关选项
 - 代理默认关闭，只有在你确认需要时才会要求填写地址
-- `setup.ps1` 会先检查 Windows 版本、`LOCALAPPDATA` 可写性、`winget`、`pwsh`、`oh-my-posh`、`wt`、`clink`、`VS Code` 等环境状态
+- `setup.ps1` 会先检查 Windows 版本、`LOCALAPPDATA` 可写性，以及扩展工具扫描结果：`winget`、`pwsh`、`oh-my-posh`、`wt`、`clink`、`VS Code`、`git`、`npm`、`pnpm`、`yarn`、`pip`、`uv`、`cargo`、`docker`
+- `setup.ps1` 的环境报告会显示当前代理环境变量可见性，包括 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`
 - 如果缺少 `oh-my-posh` 且又无法自动安装，预检会直接阻断，而不是让用户走到一半才失败
 
 ## 兼容性结论
