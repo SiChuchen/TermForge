@@ -50,6 +50,32 @@ function Get-SccSetupWindowsPowerShellPath {
     return (Get-SccSetupCommandSource -CommandName "powershell.exe")
 }
 
+function Get-SccSetupInstallHostInfo {
+    $windowsPowerShellPath = Get-SccSetupWindowsPowerShellPath
+    if (-not [string]::IsNullOrWhiteSpace($windowsPowerShellPath)) {
+        return [pscustomobject]@{
+            HostExecutable = $windowsPowerShellPath
+            Source         = 'windows-powershell'
+            IsAvailable    = $true
+        }
+    }
+
+    $pwshPath = Get-SccSetupCommandSource -CommandName "pwsh"
+    if (-not [string]::IsNullOrWhiteSpace($pwshPath)) {
+        return [pscustomobject]@{
+            HostExecutable = $pwshPath
+            Source         = 'pwsh'
+            IsAvailable    = $true
+        }
+    }
+
+    return [pscustomobject]@{
+        HostExecutable = $null
+        Source         = 'none'
+        IsAvailable    = $false
+    }
+}
+
 function Test-SccWritablePath {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -115,6 +141,7 @@ function Show-SccSetupSummary {
 function Get-SccSetupBlockingIssues {
     param(
         [Parameter(Mandatory)]$Report,
+        [Parameter(Mandatory)]$InstallHostInfo,
         [Parameter(Mandatory)][bool]$SkipDependencyInstallFlag
     )
 
@@ -135,7 +162,13 @@ function Get-SccSetupBlockingIssues {
             $issues += "当前缺少 oh-my-posh，且你要求跳过依赖安装。TermForge 无法继续。"
         } elseif (-not $Report.HasWinget) {
             $issues += "当前缺少 oh-my-posh，且未检测到 winget，安装器无法自动补齐必需依赖。"
+        } elseif (-not $InstallHostInfo.IsAvailable) {
+            $issues += "当前缺少 oh-my-posh，且未找到可用的 PowerShell 宿主来启动 install.ps1。"
         }
+    }
+
+    if (-not $InstallHostInfo.IsAvailable) {
+        $issues += "未找到可用的 PowerShell 宿主，无法启动 install.ps1。"
     }
 
     return @($issues)
@@ -178,6 +211,12 @@ function Get-SccSetupProxyEnvironment {
 }
 
 function Get-SccSetupToolReport {
+    param(
+        [Parameter(Mandatory)]$EnvironmentReport,
+        [Parameter(Mandatory)]$InstallHostInfo,
+        [Parameter(Mandatory)][bool]$SkipDependencyInstallFlag
+    )
+
     $toolSpecs = @(
         @{ Name = 'winget'; Required = $false }
         @{ Name = 'pwsh'; Required = $false }
@@ -198,8 +237,35 @@ function Get-SccSetupToolReport {
     foreach ($toolSpec in $toolSpecs) {
         $path = Get-SccSetupCommandSource -CommandName $toolSpec.Name
         $detected = -not [string]::IsNullOrWhiteSpace($path)
-        $status = if ($detected) { 'PASS' } elseif ($toolSpec.Required) { 'FAIL' } else { 'WARN' }
-        $message = if ($detected) { $path } elseif ($toolSpec.Required) { 'required but missing' } else { 'optional but missing' }
+        $canAutoInstall = (
+            $toolSpec.Required -and
+            -not $detected -and
+            -not $SkipDependencyInstallFlag -and
+            $EnvironmentReport.HasWinget -and
+            $InstallHostInfo.IsAvailable
+        )
+
+        $status = if ($detected) {
+            'PASS'
+        } elseif ($toolSpec.Required -and -not $canAutoInstall) {
+            'FAIL'
+        } else {
+            'WARN'
+        }
+
+        $message = if ($detected) {
+            $path
+        } elseif ($toolSpec.Required -and $SkipDependencyInstallFlag) {
+            'required but missing; dependency install is skipped'
+        } elseif ($toolSpec.Required -and -not $EnvironmentReport.HasWinget) {
+            'required but missing; automatic install is unavailable'
+        } elseif ($toolSpec.Required -and -not $InstallHostInfo.IsAvailable) {
+            'required but missing; install host is unavailable'
+        } elseif ($toolSpec.Required) {
+            'required but missing; can be installed automatically'
+        } else {
+            'optional but missing'
+        }
 
         New-SccSetupToolResult `
             -Name $toolSpec.Name `
@@ -212,10 +278,27 @@ function Get-SccSetupToolReport {
 }
 
 function Get-SccSetupStructuredReport {
-    $environment = Get-SccSetupReport
-    $tools = @(Get-SccSetupToolReport)
+    param(
+        $EnvironmentReport,
+        $InstallHostInfo,
+        [bool]$SkipDependencyInstallFlag = $SkipDependencyInstall
+    )
+
+    $environment = if ($null -ne $EnvironmentReport) { $EnvironmentReport } else { Get-SccSetupReport }
+    $resolvedInstallHostInfo = if ($null -ne $InstallHostInfo) { $InstallHostInfo } else { Get-SccSetupInstallHostInfo }
+    $tools = @(
+        Get-SccSetupToolReport `
+            -EnvironmentReport $environment `
+            -InstallHostInfo $resolvedInstallHostInfo `
+            -SkipDependencyInstallFlag:$SkipDependencyInstallFlag
+    )
     $proxyEnvironment = Get-SccSetupProxyEnvironment
-    $blockingIssues = @(Get-SccSetupBlockingIssues -Report $environment -SkipDependencyInstallFlag:$SkipDependencyInstall)
+    $blockingIssues = @(
+        Get-SccSetupBlockingIssues `
+            -Report $environment `
+            -InstallHostInfo $resolvedInstallHostInfo `
+            -SkipDependencyInstallFlag:$SkipDependencyInstallFlag
+    )
     $warnings = @()
 
     $warnings += @(
@@ -247,7 +330,14 @@ function Get-SccSetupStructuredReport {
         ProxyEnvironment = $proxyEnvironment
         InstallReadiness = [pscustomobject][ordered]@{
             CanContinue               = ($blockingIssues.Count -eq 0)
-            RequiresDependencyInstall = @($tools | Where-Object { $_.Required -and -not $_.Detected -and $environment.HasWinget }).Count -gt 0
+            RequiresDependencyInstall = @(
+                $tools |
+                    Where-Object {
+                        $_.Required -and
+                        -not $_.Detected -and
+                        $_.Status -eq 'WARN'
+                    }
+            ).Count -gt 0
             BlockingIssueCount        = $blockingIssues.Count
             WarningCount              = $warnings.Count
             RecommendedInstallMode    = if (-not $environment.HasWinget -and -not $environment.HasOhMyPosh) { 'manual-deps-required' } elseif (-not $environment.HasWindowsTerminal) { 'without-terminal' } elseif (-not $environment.HasClink) { 'without-cmd' } else { 'full' }
@@ -304,7 +394,8 @@ function Read-SccSetupContinue {
 }
 
 $setupReport = Get-SccSetupReport
-$structuredReport = Get-SccSetupStructuredReport
+$installHostInfo = Get-SccSetupInstallHostInfo
+$structuredReport = Get-SccSetupStructuredReport -EnvironmentReport $setupReport -InstallHostInfo $installHostInfo -SkipDependencyInstallFlag:$SkipDependencyInstall
 
 if ($Json) {
     $structuredReport | ConvertTo-Json -Depth 8
@@ -318,7 +409,12 @@ if ($Report) {
 
 Show-SccSetupSummary -Report $setupReport
 
-$blockingIssues = @(Get-SccSetupBlockingIssues -Report $setupReport -SkipDependencyInstallFlag:$SkipDependencyInstall)
+$blockingIssues = @(
+    Get-SccSetupBlockingIssues `
+        -Report $setupReport `
+        -InstallHostInfo $installHostInfo `
+        -SkipDependencyInstallFlag:$SkipDependencyInstall
+)
 if ($blockingIssues.Count -gt 0) {
     foreach ($issue in $blockingIssues) {
         Write-Host "[setup] $issue" -ForegroundColor Red
@@ -340,10 +436,7 @@ if (-not (Test-Path $installScript)) {
     throw "未找到 install.ps1: $installScript"
 }
 
-$hostExecutable = Get-SccSetupWindowsPowerShellPath
-if ([string]::IsNullOrWhiteSpace($hostExecutable)) {
-    $hostExecutable = Get-SccSetupCommandSource -CommandName "pwsh"
-}
+$hostExecutable = $installHostInfo.HostExecutable
 if ([string]::IsNullOrWhiteSpace($hostExecutable)) {
     throw "未找到可用的 PowerShell 宿主，无法启动 install.ps1。"
 }
