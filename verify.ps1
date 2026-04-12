@@ -64,6 +64,9 @@ function Invoke-SccProfileSmokeTest {
             if ($doctor.SchemaVersion -ne "2026-04-11" -or $doctor.Command -ne "doctor" -or [string]::IsNullOrWhiteSpace($doctor.Payload.OverallStatus)) {
                 throw "$commandName doctor json 未返回 .NET 控制面 doctor 契约。"
             }
+            if ($doctor.Payload.PrimaryCommandName -ne $status.Payload.PrimaryCommand) {
+                throw 'doctor json 与 status --json 的主命令名不一致。'
+            }
 
             $enabledModules = Get-SccEnabledModuleNames -State $state
             $verifiedCommands = @()

@@ -70,6 +70,25 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 - `ProxyEnvironment`
 - `InstallReadiness`
 
+## 共享环境事实模型
+
+当前 phase1 已把环境扫描收敛到一层共享事实模型，核心事实包括：
+
+- `Host`
+- `Tools`
+- `ProxyEnvironment`
+- `InstallHost`
+
+这层事实目前仍由 PowerShell 负责采集和归一化，原因是安装器、profile 入口和现有 setup 预检本来就运行在 PowerShell 宿主内；在这个阶段继续把扫描逻辑留在 PowerShell，可以避免在 `.NET` 与脚本之间重复实现同一套主机环境探测。
+
+`setup --json`、`status --json`、`doctor json` 都从这层共享事实出发，但各自只投影自己需要的最终字段和 schema：
+
+- `setup --json` 面向安装前预检与可继续性判断
+- `status --json` 面向运行时状态汇总
+- `doctor json` 面向运行时诊断结果
+
+这意味着三者共享同一事实来源与主命令名解析结果，但不会在当前阶段强行统一成一个公共对外 payload。把共享事实层整体迁移到 `.NET` 仍然是后续工作，不在 phase1 范围内。
+
 ## 控制面模型
 
 当前 phase1 额外引入 `.NET` 控制核心：
@@ -83,7 +102,8 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 职责边界：
 
 - PowerShell 继续负责安装、profile 注入、模块加载和交互式入口
-- `.NET` 负责结构化 `status` / `doctor` 输出和 env 目标代理工作流
+- PowerShell 当前也负责共享环境事实采集
+- `.NET` 负责结构化 `status` / `doctor` 输出和 env 目标代理工作流，并消费共享事实层
 - PowerShell 通过桥接把 `status --json`、`doctor json` 与 `proxy scan/plan/apply/rollback --json` 转发到 `.NET CLI`
 
 这样可以在不重写安装器和运行时入口的前提下，先把 agent 需要的机器可读契约稳定下来。
