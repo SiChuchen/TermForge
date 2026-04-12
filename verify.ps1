@@ -52,16 +52,17 @@ function Invoke-SccProfileSmokeTest {
             & $commandName doctor *> $null
             & $commandName doctor fancy *> $null
             & $commandName doctor verbose *> $null
-            $doctorJson = & $commandName doctor json | Out-String
-            $doctorReport = $doctorJson | ConvertFrom-Json
-            if ([string]::IsNullOrWhiteSpace($doctorReport.OverallStatus)) {
-                throw "$commandName doctor json 返回结果缺少 OverallStatus。"
-            }
 
             $statusJson = & $commandName status --json | Out-String
             $status = $statusJson | ConvertFrom-Json
             if ($status.SchemaVersion -ne "2026-04-11") {
                 throw "$commandName status --json 未返回 .NET 控制面契约。"
+            }
+
+            $doctorJson = & $commandName doctor json | Out-String
+            $doctor = $doctorJson | ConvertFrom-Json
+            if ($doctor.SchemaVersion -ne "2026-04-11" -or $doctor.Command -ne "doctor" -or [string]::IsNullOrWhiteSpace($doctor.Payload.OverallStatus)) {
+                throw "$commandName doctor json 未返回 .NET 控制面 doctor 契约。"
             }
 
             $enabledModules = Get-SccEnabledModuleNames -State $state

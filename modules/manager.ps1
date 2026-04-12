@@ -171,7 +171,7 @@ function Invoke-SccManagerCommand {
                     [void](Show-SccDoctor -Mode "fancy")
                 }
                 "json" {
-                    Get-SccDoctorReport | ConvertTo-Json -Depth 8
+                    Invoke-SccDotNetCli doctor --json
                 }
                 default {
                     Write-Host "[SCC] 不支持的 doctor 模式: $doctorMode。可选: default, fancy, verbose, json" -ForegroundColor Red

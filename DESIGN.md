@@ -69,8 +69,8 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 职责边界：
 
 - PowerShell 继续负责安装、profile 注入、模块加载和交互式入口
-- `.NET` 负责结构化 `status` 输出和 env 目标代理工作流
-- PowerShell 通过桥接把 `status --json` 与 `proxy scan/plan/apply/rollback --json` 转发到 `.NET CLI`
+- `.NET` 负责结构化 `status` / `doctor` 输出和 env 目标代理工作流
+- PowerShell 通过桥接把 `status --json`、`doctor json` 与 `proxy scan/plan/apply/rollback --json` 转发到 `.NET CLI`
 
 这样可以在不重写安装器和运行时入口的前提下，先把 agent 需要的机器可读契约稳定下来。
 
@@ -142,6 +142,11 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 - `proxy rollback --change-id <id> --json`
 
 当前仍只支持 `env` 目标；`git/npm/pip` 等应用级适配器留在后续阶段。
+
+`doctor` 当前分成两条路径：
+
+- `doctor` / `doctor fancy` / `doctor verbose` 继续由 PowerShell 根据本地结果渲染
+- `doctor json` 改由 `.NET CLI` 产生稳定 schema，供 agent 和后续 MCP 直接消费
 
 ## 主题策略
 
