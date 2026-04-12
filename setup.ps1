@@ -2,10 +2,16 @@
 param(
     [string]$InstallRoot,
     [switch]$SkipDependencyInstall,
-    [switch]$SkipVerification
+    [switch]$SkipVerification,
+    [switch]$Json,
+    [switch]$Report
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($Json -and $Report) {
+    throw 'setup.ps1 不支持同时使用 --json 和 --report。'
+}
 
 function Get-SccSetupCommandSource {
     param([Parameter(Mandatory)][string]$CommandName)
@@ -183,10 +189,10 @@ function Read-SccSetupContinue {
     }
 }
 
-$report = Get-SccSetupReport
-Show-SccSetupSummary -Report $report
+$setupReport = Get-SccSetupReport
+Show-SccSetupSummary -Report $setupReport
 
-$blockingIssues = @(Get-SccSetupBlockingIssues -Report $report -SkipDependencyInstallFlag:$SkipDependencyInstall)
+$blockingIssues = @(Get-SccSetupBlockingIssues -Report $setupReport -SkipDependencyInstallFlag:$SkipDependencyInstall)
 if ($blockingIssues.Count -gt 0) {
     foreach ($issue in $blockingIssues) {
         Write-Host "[setup] $issue" -ForegroundColor Red
@@ -194,7 +200,7 @@ if ($blockingIssues.Count -gt 0) {
     exit 1
 }
 
-Show-SccSetupWarnings -Report $report -SkipDependencyInstallFlag:$SkipDependencyInstall
+Show-SccSetupWarnings -Report $setupReport -SkipDependencyInstallFlag:$SkipDependencyInstall
 
 Write-Host ""
 Write-Host "接下来会进入交互式安装向导，由你选择主命令名、宿主集成、代理与依赖策略。" -ForegroundColor DarkGray
