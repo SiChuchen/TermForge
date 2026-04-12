@@ -345,35 +345,53 @@ function Get-SccSetupStructuredReport {
     }
 }
 
-function Show-SccSetupWarnings {
-    param(
-        [Parameter(Mandatory)]$Report,
-        [Parameter(Mandatory)][bool]$SkipDependencyInstallFlag
-    )
+function Show-SccSetupReport {
+    param([Parameter(Mandatory)]$StructuredReport)
 
-    if (-not $Report.HasWinget) {
-        Write-Host "[setup] 未检测到 winget；只能依赖本机已存在的组件，无法自动安装可选依赖。" -ForegroundColor Yellow
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('')
+    $lines.Add('TermForge Setup Report')
+    $lines.Add(('Overall status  : {0}' -f $StructuredReport.OverallStatus))
+    $lines.Add(('OS              : {0}' -f $StructuredReport.Environment.OsVersion))
+    $lines.Add(('PowerShell      : {0} {1}' -f $StructuredReport.Environment.PowerShellEdition, $StructuredReport.Environment.PowerShellVersion))
+    $lines.Add(('LOCALAPPDATA    : {0}' -f $StructuredReport.Environment.LocalAppData))
+    $lines.Add(('Writable        : {0}' -f $StructuredReport.Environment.CanWriteLocalAppData))
+    $lines.Add('')
+    $lines.Add('Tools')
+
+    foreach ($tool in $StructuredReport.Tools) {
+        $lines.Add(('  {0,-12} {1,-4} {2}' -f $tool.Name, $tool.Status, $tool.Message))
     }
 
-    if (-not $Report.HasPwsh) {
-        Write-Host "[setup] 未检测到 PowerShell 7；如果后续选择 PowerShell / VS Code 集成，建议允许安装器补齐 pwsh。" -ForegroundColor Yellow
+    $lines.Add('')
+    $lines.Add('Proxy environment')
+    $lines.Add(('  Enabled : {0}' -f $StructuredReport.ProxyEnvironment.Enabled))
+    $lines.Add(('  HTTP    : {0}' -f $StructuredReport.ProxyEnvironment.HttpProxy))
+    $lines.Add(('  HTTPS   : {0}' -f $StructuredReport.ProxyEnvironment.HttpsProxy))
+    $lines.Add(('  NO_PROXY: {0}' -f $StructuredReport.ProxyEnvironment.NoProxy))
+    $lines.Add('')
+    $lines.Add('Install readiness')
+    $lines.Add(('  CanContinue              : {0}' -f $StructuredReport.InstallReadiness.CanContinue))
+    $lines.Add(('  RequiresDependencyInstall: {0}' -f $StructuredReport.InstallReadiness.RequiresDependencyInstall))
+    $lines.Add(('  RecommendedInstallMode   : {0}' -f $StructuredReport.InstallReadiness.RecommendedInstallMode))
+
+    if ($StructuredReport.BlockingIssues.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add('Blocking issues')
+        foreach ($issue in $StructuredReport.BlockingIssues) {
+            $lines.Add(('  - {0}' -f $issue))
+        }
     }
 
-    if (-not $Report.HasWindowsTerminal) {
-        Write-Host "[setup] 未检测到 Windows Terminal；这不是阻塞项，如果你只在 VS Code 或 PowerShell 中使用，可以在向导里关闭它。" -ForegroundColor Yellow
+    if ($StructuredReport.Warnings.Count -gt 0) {
+        $lines.Add('')
+        $lines.Add('Warnings')
+        foreach ($warning in $StructuredReport.Warnings) {
+            $lines.Add(('  - {0}' -f $warning))
+        }
     }
 
-    if (-not $Report.HasVSCode) {
-        Write-Host "[setup] 未检测到 VS Code；后续向导里可以直接关闭 VS Code 集成。" -ForegroundColor Yellow
-    }
-
-    if (-not $Report.HasClink) {
-        Write-Host "[setup] 未检测到 Clink；如果你不需要 CMD 集成，可以在向导里关闭它。" -ForegroundColor Yellow
-    }
-
-    if ($SkipDependencyInstallFlag) {
-        Write-Host "[setup] 已启用 SkipDependencyInstall；缺失组件不会自动安装。" -ForegroundColor Yellow
-    }
+    Write-Output $lines
 }
 
 function Read-SccSetupContinue {
@@ -403,26 +421,15 @@ if ($Json) {
 }
 
 if ($Report) {
-    Write-Output 'setup report mode not implemented yet'
+    Show-SccSetupReport -StructuredReport $structuredReport
     exit 0
 }
 
-Show-SccSetupSummary -Report $setupReport
+Show-SccSetupReport -StructuredReport $structuredReport
 
-$blockingIssues = @(
-    Get-SccSetupBlockingIssues `
-        -Report $setupReport `
-        -InstallHostInfo $installHostInfo `
-        -SkipDependencyInstallFlag:$SkipDependencyInstall
-)
-if ($blockingIssues.Count -gt 0) {
-    foreach ($issue in $blockingIssues) {
-        Write-Host "[setup] $issue" -ForegroundColor Red
-    }
+if ($structuredReport.InstallReadiness.BlockingIssueCount -gt 0) {
     exit 1
 }
-
-Show-SccSetupWarnings -Report $setupReport -SkipDependencyInstallFlag:$SkipDependencyInstall
 
 Write-Host ""
 Write-Host "接下来会进入交互式安装向导，由你选择主命令名、宿主集成、代理与依赖策略。" -ForegroundColor DarkGray

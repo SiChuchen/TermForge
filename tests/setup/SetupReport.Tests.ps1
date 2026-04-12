@@ -30,4 +30,14 @@ Describe 'setup.ps1 report modes' {
         $report.ProxyEnvironment.Status | Should Match '^(PASS|WARN|FAIL)$'
     }
 
+    It 'prints a report without entering install when --report is used' {
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $setupPath = Join-Path $repoRoot 'setup.ps1'
+
+        $output = & pwsh -NoLogo -NoProfile -File $setupPath --report | Out-String
+
+        $output | Should Match 'TermForge Setup Report'
+        $output | Should Match 'Install readiness'
+        $output | Should Not Match '继续进入安装向导吗'
+    }
 }
