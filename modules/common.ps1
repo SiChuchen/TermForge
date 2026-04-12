@@ -534,13 +534,13 @@ function Test-SccWritablePath {
             -bor [System.Security.AccessControl.FileSystemRights]::CreateDirectories `
             -bor [System.Security.AccessControl.FileSystemRights]::FullControl
         $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-        $principal = [System.Security.Principal.WindowsPrincipal]::new($identity)
         $acl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
         $allowWrite = $false
 
         foreach ($accessRule in $acl.Access) {
-            $isCurrentIdentity = $identity.User -and $accessRule.IdentityReference -eq $identity.User
-            $isCurrentGroup = $identity.Groups -and ($identity.Groups -contains $accessRule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]))
+            $accessSid = $accessRule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier])
+            $isCurrentIdentity = $identity.User -and $accessSid -eq $identity.User
+            $isCurrentGroup = $identity.Groups -and ($identity.Groups -contains $accessSid)
 
             if (-not ($isCurrentIdentity -or $isCurrentGroup)) {
                 continue

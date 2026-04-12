@@ -95,4 +95,11 @@ Describe 'shared environment facts' {
             }
         }
     }
+
+    It 'returns true for an existing writable temp directory under the current user context' {
+        $path = [System.IO.Path]::GetTempPath()
+
+        Test-Path $path | Should Be $true
+        Test-SccWritablePath -Path $path | Should Be $true
+    }
 }
