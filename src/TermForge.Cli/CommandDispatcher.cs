@@ -29,12 +29,17 @@ internal sealed class CommandDispatcher
             return new StatusService(_configStore).BuildReport();
         }
 
+
+        if (args.Count == 2 && Is(args[0], "doctor") && Is(args[1], "--json"))
+        {
+            return new DoctorService(_configStore).BuildReport();
+        }
         if (args.Count >= 2 && Is(args[0], "proxy"))
         {
             return DispatchProxy(args);
         }
 
-        throw new InvalidOperationException("Unsupported command. Use status --json or proxy <scan|plan|apply|rollback> ... --json.");
+        throw new InvalidOperationException("Unsupported command. Use status --json, doctor --json, or proxy <scan|plan|apply|rollback> ... --json.");
     }
 
     private object DispatchProxy(IReadOnlyList<string> args)
