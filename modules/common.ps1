@@ -488,11 +488,13 @@ function Get-SccSetupCommandSource {
 }
 
 function Get-SccSetupWindowsPowerShellPath {
-    $candidates = @(
-        (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe")
-        (Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe")
-        "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $candidates = @()
+    foreach ($windowsRoot in @($env:SystemRoot, $env:WINDIR)) {
+        if (-not [string]::IsNullOrWhiteSpace($windowsRoot)) {
+            $candidates += Join-Path $windowsRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+        }
+    }
+    $candidates += "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
 
     foreach ($candidate in $candidates | Select-Object -Unique) {
         if (Test-Path $candidate) {
@@ -507,14 +509,57 @@ function Test-SccWritablePath {
     param([Parameter(Mandatory)][string]$Path)
 
     try {
-        if (-not (Test-Path $Path)) {
-            New-Item -Path $Path -ItemType Directory -Force | Out-Null
+        if ([string]::IsNullOrWhiteSpace($Path)) {
+            return $false
         }
 
-        $probePath = Join-Path $Path ".termforge-write-probe"
-        Set-Content -Path $probePath -Value "ok" -Encoding ASCII
-        Remove-Item -Path $probePath -Force
-        return $true
+        $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+        if (-not $item.PSIsContainer) {
+            return $false
+        }
+
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+            return $false
+        }
+
+        $isWindowsPlatform = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+        if (-not $isWindowsPlatform) {
+            return $true
+        }
+
+        $writeLikeRights = `
+            [System.Security.AccessControl.FileSystemRights]::Write `
+            -bor [System.Security.AccessControl.FileSystemRights]::Modify `
+            -bor [System.Security.AccessControl.FileSystemRights]::CreateFiles `
+            -bor [System.Security.AccessControl.FileSystemRights]::CreateDirectories `
+            -bor [System.Security.AccessControl.FileSystemRights]::FullControl
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = [System.Security.Principal.WindowsPrincipal]::new($identity)
+        $acl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+        $allowWrite = $false
+
+        foreach ($accessRule in $acl.Access) {
+            $isCurrentIdentity = $identity.User -and $accessRule.IdentityReference -eq $identity.User
+            $isCurrentGroup = $identity.Groups -and ($identity.Groups -contains $accessRule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]))
+
+            if (-not ($isCurrentIdentity -or $isCurrentGroup)) {
+                continue
+            }
+
+            if (($accessRule.FileSystemRights -band $writeLikeRights) -eq 0) {
+                continue
+            }
+
+            if ($accessRule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny) {
+                return $false
+            }
+
+            if ($accessRule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow) {
+                $allowWrite = $true
+            }
+        }
+
+        return $allowWrite
     } catch {
         return $false
     }
@@ -766,7 +811,9 @@ function Get-SccSetupEnvironmentReport {
             ).Count -gt 0
             BlockingIssueCount        = $blockingIssues.Count
             WarningCount              = $warnings.Count
-            RecommendedInstallMode    = if (($null -eq $wingetFacts -or -not $wingetFacts.Detected) -and ($null -eq $ohMyPoshFacts -or -not $ohMyPoshFacts.Detected)) {
+            RecommendedInstallMode    = if (-not $EnvironmentFacts.InstallHost.IsAvailable) {
+                'manual-deps-required'
+            } elseif (($null -eq $wingetFacts -or -not $wingetFacts.Detected) -and ($null -eq $ohMyPoshFacts -or -not $ohMyPoshFacts.Detected)) {
                 'manual-deps-required'
             } elseif ($null -eq $windowsTerminalFacts -or -not $windowsTerminalFacts.Detected) {
                 'without-terminal'
