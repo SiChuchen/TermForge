@@ -141,6 +141,120 @@ function Get-SccSetupBlockingIssues {
     return @($issues)
 }
 
+function New-SccSetupToolResult {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][bool]$Detected,
+        [string]$CommandPath,
+        [Parameter(Mandatory)][bool]$Required,
+        [Parameter(Mandatory)][ValidateSet('PASS','WARN','FAIL')][string]$Status,
+        [Parameter(Mandatory)][string]$Message
+    )
+
+    [pscustomobject][ordered]@{
+        Name        = $Name
+        Detected    = $Detected
+        CommandPath = $CommandPath
+        Required    = $Required
+        Status      = $Status
+        Message     = $Message
+    }
+}
+
+function Get-SccSetupProxyEnvironment {
+    $http = if ($env:http_proxy) { $env:http_proxy } elseif ($env:HTTP_PROXY) { $env:HTTP_PROXY } else { '' }
+    $https = if ($env:https_proxy) { $env:https_proxy } elseif ($env:HTTPS_PROXY) { $env:HTTPS_PROXY } else { '' }
+    $noProxy = if ($env:no_proxy) { $env:no_proxy } elseif ($env:NO_PROXY) { $env:NO_PROXY } else { '' }
+    $enabled = (-not [string]::IsNullOrWhiteSpace($http)) -or (-not [string]::IsNullOrWhiteSpace($https))
+
+    [pscustomobject][ordered]@{
+        Enabled    = $enabled
+        HttpProxy  = $http
+        HttpsProxy = $https
+        NoProxy    = $noProxy
+        Source     = if ($enabled) { 'process' } else { 'none' }
+        Status     = if ($enabled) { 'WARN' } else { 'PASS' }
+    }
+}
+
+function Get-SccSetupToolReport {
+    $toolSpecs = @(
+        @{ Name = 'winget'; Required = $false }
+        @{ Name = 'pwsh'; Required = $false }
+        @{ Name = 'oh-my-posh'; Required = $true }
+        @{ Name = 'wt'; Required = $false }
+        @{ Name = 'clink'; Required = $false }
+        @{ Name = 'code'; Required = $false }
+        @{ Name = 'git'; Required = $false }
+        @{ Name = 'npm'; Required = $false }
+        @{ Name = 'pnpm'; Required = $false }
+        @{ Name = 'yarn'; Required = $false }
+        @{ Name = 'pip'; Required = $false }
+        @{ Name = 'uv'; Required = $false }
+        @{ Name = 'cargo'; Required = $false }
+        @{ Name = 'docker'; Required = $false }
+    )
+
+    foreach ($toolSpec in $toolSpecs) {
+        $path = Get-SccSetupCommandSource -CommandName $toolSpec.Name
+        $detected = -not [string]::IsNullOrWhiteSpace($path)
+        $status = if ($detected) { 'PASS' } elseif ($toolSpec.Required) { 'FAIL' } else { 'WARN' }
+        $message = if ($detected) { $path } elseif ($toolSpec.Required) { 'required but missing' } else { 'optional but missing' }
+
+        New-SccSetupToolResult `
+            -Name $toolSpec.Name `
+            -Detected $detected `
+            -CommandPath $path `
+            -Required $toolSpec.Required `
+            -Status $status `
+            -Message $message
+    }
+}
+
+function Get-SccSetupStructuredReport {
+    $environment = Get-SccSetupReport
+    $tools = @(Get-SccSetupToolReport)
+    $proxyEnvironment = Get-SccSetupProxyEnvironment
+    $blockingIssues = @(Get-SccSetupBlockingIssues -Report $environment -SkipDependencyInstallFlag:$SkipDependencyInstall)
+    $warnings = @()
+
+    $warnings += @(
+        $tools |
+            Where-Object { $_.Status -eq 'WARN' } |
+            ForEach-Object { '{0}: {1}' -f $_.Name, $_.Message }
+    )
+
+    if ($proxyEnvironment.Status -eq 'WARN') {
+        $warnings += 'Proxy environment variables are enabled for this process.'
+    }
+
+    [pscustomobject][ordered]@{
+        SchemaVersion    = '2026-04-12'
+        GeneratedAt      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        OverallStatus    = if ($blockingIssues.Count -gt 0) { 'FAIL' } elseif ($warnings.Count -gt 0) { 'WARN' } else { 'PASS' }
+        BlockingIssues   = @($blockingIssues)
+        Warnings         = @($warnings)
+        Environment      = [pscustomobject][ordered]@{
+            IsWindows           = $environment.IsWindows
+            OsVersion           = $environment.OsVersionText
+            PowerShellEdition   = $environment.PowerShellEdition
+            PowerShellVersion   = $environment.PowerShellVersion
+            LocalAppData        = $environment.LocalAppData
+            DocumentsPath       = $environment.DocumentsPath
+            CanWriteLocalAppData = $environment.CanWriteLocalAppData
+        }
+        Tools            = @($tools)
+        ProxyEnvironment = $proxyEnvironment
+        InstallReadiness = [pscustomobject][ordered]@{
+            CanContinue               = ($blockingIssues.Count -eq 0)
+            RequiresDependencyInstall = @($tools | Where-Object { $_.Required -and -not $_.Detected -and $environment.HasWinget }).Count -gt 0
+            BlockingIssueCount        = $blockingIssues.Count
+            WarningCount              = $warnings.Count
+            RecommendedInstallMode    = if (-not $environment.HasWinget -and -not $environment.HasOhMyPosh) { 'manual-deps-required' } elseif (-not $environment.HasWindowsTerminal) { 'without-terminal' } elseif (-not $environment.HasClink) { 'without-cmd' } else { 'full' }
+        }
+    }
+}
+
 function Show-SccSetupWarnings {
     param(
         [Parameter(Mandatory)]$Report,
@@ -190,9 +304,10 @@ function Read-SccSetupContinue {
 }
 
 $setupReport = Get-SccSetupReport
+$structuredReport = Get-SccSetupStructuredReport
 
 if ($Json) {
-    Write-Output 'setup report mode not implemented yet'
+    $structuredReport | ConvertTo-Json -Depth 8
     exit 0
 }
 
