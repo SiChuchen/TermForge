@@ -466,6 +466,170 @@ function Save-SccConfig {
     Write-SccJsonFile -Path (Get-SccConfigPath) -Value $Config
 }
 
+function Get-SccSetupCommandSource {
+    param([Parameter(Mandatory)][string]$CommandName)
+
+    $command = Get-Command $CommandName -ErrorAction SilentlyContinue
+    if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+        return $command.Source
+    }
+
+    try {
+        $candidate = & where.exe $CommandName 2>$null |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path $_) } |
+            Select-Object -First 1
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            return $candidate
+        }
+    } catch {
+    }
+
+    return $null
+}
+
+function Get-SccSetupWindowsPowerShellPath {
+    $candidates = @(
+        (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe")
+        (Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe")
+        "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    return (Get-SccSetupCommandSource -CommandName "powershell.exe")
+}
+
+function Test-SccWritablePath {
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        if (-not (Test-Path $Path)) {
+            New-Item -Path $Path -ItemType Directory -Force | Out-Null
+        }
+
+        $probePath = Join-Path $Path ".termforge-write-probe"
+        Set-Content -Path $probePath -Value "ok" -Encoding ASCII
+        Remove-Item -Path $probePath -Force
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Get-SccHostFacts {
+    $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+    $documentsPath = [Environment]::GetFolderPath('MyDocuments')
+    $osVersion = [Environment]::OSVersion.Version
+    $isWindowsPlatform = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+
+    [pscustomobject][ordered]@{
+        IsWindows = $isWindowsPlatform
+        OsVersion = $osVersion.ToString()
+        PowerShellEdition = $PSVersionTable.PSEdition
+        PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+        LocalAppData = $localAppData
+        DocumentsPath = $documentsPath
+        CanWriteLocalAppData = (
+            -not [string]::IsNullOrWhiteSpace($localAppData) -and
+            (Test-SccWritablePath -Path $localAppData)
+        )
+    }
+}
+
+function Get-SccInstallHostFacts {
+    $hostExecutable = Get-SccSetupWindowsPowerShellPath
+    if ([string]::IsNullOrWhiteSpace($hostExecutable)) {
+        $hostExecutable = Get-SccSetupCommandSource -CommandName 'pwsh'
+    }
+
+    [pscustomobject][ordered]@{
+        IsAvailable = -not [string]::IsNullOrWhiteSpace($hostExecutable)
+        ExecutablePath = $hostExecutable
+        HostKind = if ($hostExecutable -match 'powershell\.exe$') { 'windows-powershell' } elseif ($hostExecutable -match 'pwsh') { 'pwsh' } else { 'unknown' }
+        Status = if ([string]::IsNullOrWhiteSpace($hostExecutable)) { 'FAIL' } else { 'PASS' }
+        Message = if ([string]::IsNullOrWhiteSpace($hostExecutable)) { '未找到可用的 PowerShell 宿主，无法启动 install.ps1。' } else { $hostExecutable }
+    }
+}
+
+function Get-SccToolFacts {
+    param(
+        [Parameter(Mandatory)]$HostFacts,
+        [Parameter(Mandatory)]$InstallHostFacts,
+        [Parameter(Mandatory)][bool]$SkipDependencyInstallFlag
+    )
+
+    $toolSpecs = @(
+        @{ Name = 'winget'; Required = $false }
+        @{ Name = 'pwsh'; Required = $false }
+        @{ Name = 'oh-my-posh'; Required = $true }
+        @{ Name = 'wt'; Required = $false }
+        @{ Name = 'clink'; Required = $false }
+        @{ Name = 'code'; Required = $false }
+        @{ Name = 'git'; Required = $false }
+        @{ Name = 'npm'; Required = $false }
+        @{ Name = 'pnpm'; Required = $false }
+        @{ Name = 'yarn'; Required = $false }
+        @{ Name = 'pip'; Required = $false }
+        @{ Name = 'uv'; Required = $false }
+        @{ Name = 'cargo'; Required = $false }
+        @{ Name = 'docker'; Required = $false }
+    )
+
+    foreach ($toolSpec in $toolSpecs) {
+        $path = Get-SccSetupCommandSource -CommandName $toolSpec.Name
+        $detected = -not [string]::IsNullOrWhiteSpace($path)
+        $canAutoInstall = $toolSpec.Required -and -not $SkipDependencyInstallFlag -and ($toolSpec.Name -eq 'oh-my-posh') -and ($null -ne (Get-SccSetupCommandSource -CommandName 'winget')) -and $InstallHostFacts.IsAvailable
+        $status = if ($detected) { 'PASS' } elseif ($canAutoInstall) { 'WARN' } elseif ($toolSpec.Required) { 'FAIL' } else { 'WARN' }
+        $message = if ($detected) { $path } elseif ($canAutoInstall) { 'required but missing; can be installed automatically' } elseif ($toolSpec.Required) { 'required but missing' } else { 'optional but missing' }
+
+        [pscustomobject][ordered]@{
+            Name = $toolSpec.Name
+            Detected = $detected
+            CommandPath = $path
+            Required = $toolSpec.Required
+            CanAutoInstall = $canAutoInstall
+            Status = $status
+            Message = $message
+        }
+    }
+}
+
+function Get-SccProxyEnvironmentFacts {
+    $http = if ($env:http_proxy) { $env:http_proxy } elseif ($env:HTTP_PROXY) { $env:HTTP_PROXY } else { '' }
+    $https = if ($env:https_proxy) { $env:https_proxy } elseif ($env:HTTPS_PROXY) { $env:HTTPS_PROXY } else { '' }
+    $noProxy = if ($env:no_proxy) { $env:no_proxy } elseif ($env:NO_PROXY) { $env:NO_PROXY } else { '' }
+    $enabled = -not [string]::IsNullOrWhiteSpace($http) -or -not [string]::IsNullOrWhiteSpace($https)
+
+    [pscustomobject][ordered]@{
+        Enabled = $enabled
+        HttpProxy = $http
+        HttpsProxy = $https
+        NoProxy = $noProxy
+        Source = if ($enabled) { 'process' } else { 'none' }
+        Status = if ($enabled) { 'WARN' } else { 'PASS' }
+    }
+}
+
+function Get-SccEnvironmentFacts {
+    param([bool]$SkipDependencyInstallFlag = $false)
+
+    $hostFacts = Get-SccHostFacts
+    $installHostFacts = Get-SccInstallHostFacts
+    $toolFacts = @(Get-SccToolFacts -HostFacts $hostFacts -InstallHostFacts $installHostFacts -SkipDependencyInstallFlag:$SkipDependencyInstallFlag)
+    $proxyFacts = Get-SccProxyEnvironmentFacts
+
+    [pscustomobject][ordered]@{
+        Host = $hostFacts
+        Tools = $toolFacts
+        ProxyEnvironment = $proxyFacts
+        InstallHost = $installHostFacts
+    }
+}
+
 function Get-SccModuleScriptPaths {
     $modulesPath = Get-SccModulesPath
     if (-not (Test-Path $modulesPath)) {
