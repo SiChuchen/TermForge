@@ -384,6 +384,7 @@ public sealed class ProxyWorkflowService
         catch
         {
             adapter.Rollback(plan.Before);
+            adapter.Verify(plan.Before);
             throw;
         }
     }
@@ -425,6 +426,7 @@ public sealed class ProxyWorkflowService
     {
         _environmentAdapter.ApplyEnvironmentProxy(snapshot);
         var reverted = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
+        VerifyEnvironmentSnapshot(snapshot, reverted, "revert");
         _configStore.WriteProxyConfig(reverted);
     }
 

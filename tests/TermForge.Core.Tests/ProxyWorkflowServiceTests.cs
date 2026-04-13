@@ -219,6 +219,68 @@ public class ProxyWorkflowServiceTests
     }
 
     [Fact]
+    public void ProxyWorkflowService_verifies_env_cleanup_when_env_apply_verification_fails_in_composite_apply()
+    {
+        var configStore = new FakeConfigStore();
+        var planStore = new FakePlanStore();
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter(
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        environment.EnqueueAppliedTransform(snapshot => new ProxyConfigSnapshot(snapshot.Enabled, snapshot.Http + "-broken", snapshot.Https, snapshot.NoProxy));
+        environment.EnqueueAppliedTransform(snapshot => new ProxyConfigSnapshot(snapshot.Enabled, snapshot.Http + "-revert-broken", snapshot.Https, snapshot.NoProxy));
+        var service = new TermForge.Core.Services.ProxyWorkflowService(
+            configStore,
+            planStore,
+            ledger,
+            environment,
+            new FakeClock(),
+            new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", "")));
+
+        var plan = service.PlanCompositeEnable(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:7890",
+            "127.0.0.1,localhost,::1");
+
+        var error = Assert.Throws<InvalidOperationException>(() => service.Apply(plan.Payload.PlanId));
+
+        Assert.Contains("revert", error.Message);
+        Assert.Equal(0, ledger.Count);
+    }
+
+    [Fact]
+    public void ProxyWorkflowService_verifies_git_cleanup_when_git_apply_fails_in_composite_apply()
+    {
+        var configStore = new FakeConfigStore();
+        var planStore = new FakePlanStore();
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter(
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""))
+        {
+            ThrowOnApply = true,
+            CorruptRollback = true
+        };
+        var service = new TermForge.Core.Services.ProxyWorkflowService(
+            configStore,
+            planStore,
+            ledger,
+            environment,
+            new FakeClock(),
+            gitAdapter);
+
+        var plan = service.PlanCompositeEnable(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:7890",
+            "127.0.0.1,localhost,::1");
+
+        var error = Assert.Throws<InvalidOperationException>(() => service.Apply(plan.Payload.PlanId));
+
+        Assert.Contains("verification failed", error.Message);
+        Assert.False(environment.Current.Enabled);
+        Assert.Equal(0, ledger.Count);
+    }
+
+    [Fact]
     public void ProxyWorkflowService_applies_composite_env_git_successfully()
     {
         var configStore = new FakeConfigStore();
@@ -478,6 +540,8 @@ internal sealed class FakeOperationLedger : IOperationLedger
 
 internal sealed class FakePlatformEnvironmentAdapter : IPlatformEnvironmentAdapter
 {
+    private readonly Queue<Func<ProxyConfigSnapshot, ProxyConfigSnapshot>> _appliedTransforms = new();
+
     public FakePlatformEnvironmentAdapter()
         : this(new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty))
     {
@@ -495,9 +559,14 @@ internal sealed class FakePlatformEnvironmentAdapter : IPlatformEnvironmentAdapt
         return Current;
     }
 
+    public void EnqueueAppliedTransform(Func<ProxyConfigSnapshot, ProxyConfigSnapshot> transform)
+    {
+        _appliedTransforms.Enqueue(transform);
+    }
+
     public void ApplyEnvironmentProxy(ProxyConfigSnapshot snapshot)
     {
-        Current = snapshot;
+        Current = _appliedTransforms.Count > 0 ? _appliedTransforms.Dequeue()(snapshot) : snapshot;
     }
 }
 
@@ -523,6 +592,8 @@ internal sealed class InjectableGitProxyAdapter : IGitProxyAdapter
     public bool ThrowOnApply { get; set; }
 
     public bool ThrowOnVerify { get; set; }
+
+    public bool CorruptRollback { get; set; }
 
     public bool IsAvailable()
     {
@@ -578,7 +649,9 @@ internal sealed class InjectableGitProxyAdapter : IGitProxyAdapter
 
     public GitProxySnapshot Rollback(GitProxySnapshot before)
     {
-        Current = before;
+        Current = CorruptRollback
+            ? new GitProxySnapshot(before.Available, before.Scope, before.HttpProxy + "-rollback-broken", before.HttpsProxy, before.NoProxy)
+            : before;
         return before;
     }
 
