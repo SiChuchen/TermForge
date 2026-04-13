@@ -12,6 +12,7 @@ internal sealed class CommandDispatcher
     private readonly IClock _clock;
     private readonly JsonConfigStore _configStore;
     private readonly WindowsEnvironmentAdapter _environmentAdapter;
+    private readonly WindowsGitProxyAdapter _gitProxyAdapter;
     private readonly JsonOperationLedger _operationLedger;
     private readonly JsonPlanStore _planStore;
 
@@ -22,6 +23,7 @@ internal sealed class CommandDispatcher
         _planStore = new JsonPlanStore(appPaths.PlanStorePath);
         _operationLedger = new JsonOperationLedger(appPaths.OperationLedgerPath);
         _environmentAdapter = new WindowsEnvironmentAdapter();
+        _gitProxyAdapter = new WindowsGitProxyAdapter();
     }
 
     public object Dispatch(IReadOnlyList<string> args)
@@ -72,14 +74,11 @@ internal sealed class CommandDispatcher
         throw new InvalidOperationException("Unsupported proxy command. Use scan, plan, apply, or rollback.");
     }
 
-    private CommandEnvelope<ProxyPlanPayload> DispatchPlan(Dictionary<string, string?> options)
+    private object DispatchPlan(Dictionary<string, string?> options)
     {
         var mode = GetRequiredValue(options, "--mode");
         var targets = GetRequiredValue(options, "--targets");
-        if (!string.Equals(targets, "env", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Phase1 only supports --targets env.");
-        }
+        var workflow = CreateWorkflowService();
 
         if (string.Equals(mode, "enable", StringComparison.OrdinalIgnoreCase))
         {
@@ -87,12 +86,32 @@ internal sealed class CommandDispatcher
             RequireValues(options, "--https", "--no-proxy");
             var https = GetRequiredValue(options, "--https");
             var noProxy = GetRequiredValue(options, "--no-proxy");
-            return CreateWorkflowService().PlanEnable(http, https, noProxy);
+            if (string.Equals(targets, "env", StringComparison.OrdinalIgnoreCase))
+            {
+                return workflow.PlanEnable(http, https, noProxy);
+            }
+
+            if (string.Equals(targets, "git", StringComparison.OrdinalIgnoreCase))
+            {
+                return workflow.PlanGitEnable(http, https, noProxy);
+            }
+
+            throw new InvalidOperationException("Phase1 only supports standalone --targets env or --targets git.");
         }
 
         if (string.Equals(mode, "disable", StringComparison.OrdinalIgnoreCase))
         {
-            return CreateDisablePlan();
+            if (string.Equals(targets, "env", StringComparison.OrdinalIgnoreCase))
+            {
+                return CreateDisablePlan();
+            }
+
+            if (string.Equals(targets, "git", StringComparison.OrdinalIgnoreCase))
+            {
+                return workflow.PlanGitDisable();
+            }
+
+            throw new InvalidOperationException("Phase1 only supports standalone --targets env or --targets git.");
         }
 
         throw new InvalidOperationException("Unsupported proxy plan mode. Use enable or disable.");
@@ -109,7 +128,7 @@ internal sealed class CommandDispatcher
 
     private ProxyWorkflowService CreateWorkflowService()
     {
-        return new ProxyWorkflowService(_configStore, _planStore, _operationLedger, _environmentAdapter, _clock);
+        return new ProxyWorkflowService(_configStore, _planStore, _operationLedger, _environmentAdapter, _clock, _gitProxyAdapter);
     }
 
     private string? LoadSharedPrimaryCommandName()

@@ -103,7 +103,7 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 
 - PowerShell 继续负责安装、profile 注入、模块加载和交互式入口
 - PowerShell 当前也负责共享环境事实采集
-- `.NET` 负责结构化 `status` / `doctor` 输出和 env 目标代理工作流，并消费共享事实层
+- `.NET` 负责结构化 `status` / `doctor` 输出、env 目标代理工作流，以及首个 standalone 应用级代理适配器 `git` 的 plan 能力，并消费共享事实层
 - PowerShell 通过桥接把 `status --json`、`doctor json` 与 `proxy scan/plan/apply/rollback --json` 转发到 `.NET CLI`
 
 这样可以在不重写安装器和运行时入口的前提下，先把 agent 需要的机器可读契约稳定下来。
@@ -172,10 +172,18 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 
 - `proxy scan --json`
 - `proxy plan --mode <enable|disable> --targets env ... --json`
+- `proxy plan --mode <enable|disable> --targets git ... --json`
 - `proxy apply --plan-id <id> --json`
 - `proxy rollback --change-id <id> --json`
 
-当前仍只支持 `env` 目标；`git/npm/pip` 等应用级适配器留在后续阶段。
+当前的 adapter 边界如下：
+
+- `env` 仍是完整的 scan/plan/apply/rollback 工作流目标
+- `git` 是第一个 standalone adapter target
+- `git` 当前只覆盖 `git config --global` 的 `http.proxy`、`https.proxy` 和 `http.noProxy`
+- `git` 回滚模型是 snapshot-based：先读取变更前快照，再按快照重建目标键值
+- 组合式 `env + git` 多目标编排仍然延后，不在当前 phase1 范围内
+- `npm/pip` 等其他应用级适配器仍留在后续阶段
 
 `doctor` 当前分成两条路径：
 
