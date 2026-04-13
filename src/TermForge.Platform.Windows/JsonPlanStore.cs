@@ -7,6 +7,7 @@ namespace TermForge.Platform.Windows;
 public sealed class JsonPlanStore : IPlanStore
 {
     private readonly string _path;
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     public JsonPlanStore(string path)
     {
@@ -15,10 +16,20 @@ public sealed class JsonPlanStore : IPlanStore
 
     public ProxyPlanPayload? GetPlan(string planId)
     {
-        return ReadPlans().FirstOrDefault(plan => string.Equals(plan.PlanId, planId, StringComparison.Ordinal));
+        return GetPlanRecord(planId)?.ToProxyPlanPayload();
     }
 
     public void SavePlan(ProxyPlanPayload plan)
+    {
+        SavePlanRecord(plan);
+    }
+
+    public PlanRecord? GetPlanRecord(string planId)
+    {
+        return ReadPlans().FirstOrDefault(plan => string.Equals(plan.PlanId, planId, StringComparison.Ordinal));
+    }
+
+    public void SavePlanRecord(PlanRecord plan)
     {
         var plans = ReadPlans();
         var existingIndex = plans.FindIndex(existing => string.Equals(existing.PlanId, plan.PlanId, StringComparison.Ordinal));
@@ -34,7 +45,7 @@ public sealed class JsonPlanStore : IPlanStore
         WritePlans(plans);
     }
 
-    private List<ProxyPlanPayload> ReadPlans()
+    private List<PlanRecord> ReadPlans()
     {
         if (!File.Exists(_path))
         {
@@ -47,10 +58,10 @@ public sealed class JsonPlanStore : IPlanStore
             return [];
         }
 
-        return JsonSerializer.Deserialize<List<ProxyPlanPayload>>(content) ?? [];
+        return JsonSerializer.Deserialize<List<PlanRecord>>(content, JsonOptions) ?? [];
     }
 
-    private void WritePlans(List<ProxyPlanPayload> plans)
+    private void WritePlans(List<PlanRecord> plans)
     {
         var directory = Path.GetDirectoryName(_path);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -58,6 +69,6 @@ public sealed class JsonPlanStore : IPlanStore
             Directory.CreateDirectory(directory);
         }
 
-        File.WriteAllText(_path, JsonSerializer.Serialize(plans, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(_path, JsonSerializer.Serialize(plans, JsonOptions));
     }
 }
