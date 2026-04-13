@@ -46,6 +46,16 @@ public sealed class ProxyWorkflowService
         return Envelope("proxy.plan", record);
     }
 
+    public CommandEnvelope<PlanRecord> PlanDisable()
+    {
+        var current = _environmentAdapter.ReadEnvironmentProxy();
+        var desired = new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty);
+        var payload = new ProxyPlanPayload(CreateId("plan"), "env", "disable", current, desired);
+        var record = CreatePlanRecord(payload.PlanId, payload.Target, "proxy-plan", payload);
+        _planStore.SavePlanRecord(record);
+        return Envelope("proxy.plan", record);
+    }
+
     public CommandEnvelope<ChangeRecord> Apply(string planId)
     {
         var plan = _planStore.GetPlanRecord(planId) ?? throw new InvalidOperationException($"Plan not found: {planId}");

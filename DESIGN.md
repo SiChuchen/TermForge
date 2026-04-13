@@ -183,6 +183,7 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 - `git` 当前只覆盖 `git config --global` 的 `http.proxy`、`https.proxy` 和 `http.noProxy`
 - `git` 回滚模型是 snapshot-based：先读取变更前快照，再按快照重建目标键值
 - standalone `git plan/apply/rollback` 已经接通，并与 `env` 共享同一条持久化 plan/change 链路
+- `proxy scan --json` 当前仍只覆盖 `env`；`git` 还没有独立 scan 命令面
 - 组合式 `env + git` 多目标编排仍然延后，不在当前 phase1 范围内
 - `npm/pip` 等其他应用级适配器仍留在后续阶段
 

@@ -30,6 +30,30 @@ public class ProxyWorkflowServiceTests
     }
 
     [Fact]
+    public void ProxyWorkflowService_plans_env_disable_with_unified_record_contract()
+    {
+        var configStore = new FakeConfigStore();
+        var planStore = new FakePlanStore();
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter(
+            new ProxyConfigSnapshot(true, "http://env:8080", "http://env:8443", "env.local"));
+        var clock = new FakeClock();
+
+        var service = new TermForge.Core.Services.ProxyWorkflowService(configStore, planStore, ledger, environment, clock);
+
+        var result = service.PlanDisable();
+        var payload = result.Payload.ToProxyPlanPayload();
+
+        Assert.Equal("proxy.plan", result.Command);
+        Assert.Equal("2026-04-13", result.Payload.SchemaVersion);
+        Assert.Equal("proxy-plan", result.Payload.PayloadType);
+        Assert.Equal("env", result.Payload.Target);
+        Assert.Equal("disable", payload.Mode);
+        Assert.False(payload.Desired.Enabled);
+        Assert.Equal("http://env:8080", payload.Before.Http);
+    }
+
+    [Fact]
     public void ProxyWorkflowService_apply_and_rollback_use_live_environment_state()
     {
         var configStore = new FakeConfigStore();

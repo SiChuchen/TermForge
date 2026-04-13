@@ -117,13 +117,9 @@ internal sealed class CommandDispatcher
         throw new InvalidOperationException("Unsupported proxy plan mode. Use enable or disable.");
     }
 
-    private CommandEnvelope<ProxyPlanPayload> CreateDisablePlan()
+    private CommandEnvelope<PlanRecord> CreateDisablePlan()
     {
-        var current = _environmentAdapter.ReadEnvironmentProxy();
-        var desired = new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty);
-        var payload = new ProxyPlanPayload(CreateId("plan"), "env", "disable", current, desired);
-        _planStore.SavePlanRecord(payload);
-        return Envelope("proxy.plan", payload);
+        return CreateWorkflowService().PlanDisable();
     }
 
     private ProxyWorkflowService CreateWorkflowService()
