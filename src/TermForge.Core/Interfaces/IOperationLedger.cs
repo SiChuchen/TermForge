@@ -4,17 +4,19 @@ namespace TermForge.Core.Interfaces;
 
 public interface IOperationLedger
 {
-    ProxyApplyPayload? GetChange(string changeId);
-    void AppendChange(ProxyApplyPayload change);
-
     ChangeRecord? GetChangeRecord(string changeId)
-    {
-        var change = GetChange(changeId);
-        return change is null ? null : (ChangeRecord)change;
-    }
+        => throw new NotImplementedException();
 
     void AppendChangeRecord(ChangeRecord change)
+        => throw new NotImplementedException();
+
+    ProxyApplyPayload? GetChange(string changeId)
     {
-        AppendChange(change.ToProxyApplyPayload());
+        return GetChangeRecord(changeId)?.ToProxyApplyPayload();
+    }
+
+    void AppendChange(ProxyApplyPayload change)
+    {
+        AppendChangeRecord(change);
     }
 }

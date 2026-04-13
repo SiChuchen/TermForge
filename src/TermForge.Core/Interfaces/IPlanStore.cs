@@ -4,17 +4,19 @@ namespace TermForge.Core.Interfaces;
 
 public interface IPlanStore
 {
-    ProxyPlanPayload? GetPlan(string planId);
-    void SavePlan(ProxyPlanPayload plan);
-
     PlanRecord? GetPlanRecord(string planId)
-    {
-        var plan = GetPlan(planId);
-        return plan is null ? null : (PlanRecord)plan;
-    }
+        => throw new NotImplementedException();
 
     void SavePlanRecord(PlanRecord plan)
+        => throw new NotImplementedException();
+
+    ProxyPlanPayload? GetPlan(string planId)
     {
-        SavePlan(plan.ToProxyPlanPayload());
+        return GetPlanRecord(planId)?.ToProxyPlanPayload();
+    }
+
+    void SavePlan(ProxyPlanPayload plan)
+    {
+        SavePlanRecord(plan);
     }
 }

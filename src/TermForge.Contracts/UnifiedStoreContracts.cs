@@ -27,6 +27,11 @@ public sealed record PlanRecord(
         return UnifiedStoreValueReader.Deserialize<ProxyPlanPayload>(Payload) with { PlanId = PlanId, Target = Target };
     }
 
+    public GitProxyPlan ToGitProxyPlan()
+    {
+        return UnifiedStoreValueReader.Deserialize<GitProxyPlan>(Payload) with { Target = Target };
+    }
+
     public static implicit operator PlanRecord(ProxyPlanPayload payload)
     {
         return new PlanRecord(
@@ -49,6 +54,9 @@ public sealed record ChangeRecord(
     object Before,
     object After)
 {
+    [JsonIgnore]
+    public ProxyConfigSnapshot BeforeSnapshot => GetBefore<ProxyConfigSnapshot>();
+
     [JsonIgnore]
     public ProxyConfigSnapshot AfterSnapshot => ToProxyApplyPayload().After;
 

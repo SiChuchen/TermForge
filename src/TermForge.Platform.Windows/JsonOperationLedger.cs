@@ -14,16 +14,6 @@ public sealed class JsonOperationLedger : IOperationLedger
         _path = path;
     }
 
-    public ProxyApplyPayload? GetChange(string changeId)
-    {
-        return GetChangeRecord(changeId)?.ToProxyApplyPayload();
-    }
-
-    public void AppendChange(ProxyApplyPayload change)
-    {
-        AppendChangeRecord(change);
-    }
-
     public ChangeRecord? GetChangeRecord(string changeId)
     {
         return ReadChanges().FirstOrDefault(change => string.Equals(change.ChangeId, changeId, StringComparison.Ordinal));

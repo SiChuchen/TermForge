@@ -1,7 +1,7 @@
 using System;
 using System.IO;
-using System.Reflection;
 using TermForge.Contracts;
+using TermForge.Platform.Windows;
 using Xunit;
 
 namespace TermForge.Core.Tests;
@@ -41,8 +41,8 @@ public class UnifiedStoreTests
 
         try
         {
-            var planStore = UnifiedStoreHarness.CreatePlanStore(Path.Combine(root, "plans.json"));
-            var ledger = UnifiedStoreHarness.CreateLedger(Path.Combine(root, "ledger.json"));
+            var planStore = new JsonPlanStore(Path.Combine(root, "plans.json"));
+            var ledger = new JsonOperationLedger(Path.Combine(root, "ledger.json"));
 
             var gitPlan = new PlanRecord(
                 "plan-git",
@@ -85,27 +85,5 @@ public class UnifiedStoreTests
         {
             Directory.Delete(root, true);
         }
-    }
-}
-
-internal static class UnifiedStoreHarness
-{
-    public static dynamic CreatePlanStore(string path)
-    {
-        var assembly = Assembly.LoadFrom(GetWindowsAssemblyPath());
-        var type = assembly.GetType("TermForge.Platform.Windows.JsonPlanStore", throwOnError: true)!;
-        return Activator.CreateInstance(type, path)!;
-    }
-
-    public static dynamic CreateLedger(string path)
-    {
-        var assembly = Assembly.LoadFrom(GetWindowsAssemblyPath());
-        var type = assembly.GetType("TermForge.Platform.Windows.JsonOperationLedger", throwOnError: true)!;
-        return Activator.CreateInstance(type, path)!;
-    }
-
-    private static string GetWindowsAssemblyPath()
-    {
-        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "TermForge.Platform.Windows", "bin", "Debug", "net8.0", "TermForge.Platform.Windows.dll"));
     }
 }

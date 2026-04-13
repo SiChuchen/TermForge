@@ -21,11 +21,12 @@ public class ProxyWorkflowServiceTests
         var service = new TermForge.Core.Services.ProxyWorkflowService(configStore, planStore, ledger, environment, clock);
 
         var result = service.PlanEnable("http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1,localhost,::1");
+        var payload = result.Payload.ToProxyPlanPayload();
 
         Assert.Equal("proxy.plan", result.Command);
         Assert.Equal("env", result.Payload.Target);
-        Assert.True(result.Payload.Desired.Enabled);
-        Assert.Equal("http://env:8080", result.Payload.Before.Http);
+        Assert.True(payload.Desired.Enabled);
+        Assert.Equal("http://env:8080", payload.Before.Http);
     }
 
     [Fact]
@@ -43,11 +44,13 @@ public class ProxyWorkflowServiceTests
         var apply = service.Apply(plan.Payload.PlanId);
         var afterApply = environment.Current;
         var rollback = service.Rollback(apply.Payload.ChangeId);
+        var applyAfter = apply.Payload.GetAfter<ProxyConfigSnapshot>();
+        var rollbackAfter = rollback.Payload.GetAfter<ProxyConfigSnapshot>();
 
         Assert.Equal("http://target:7890", afterApply.Http);
-        Assert.Equal("http://target:7890", apply.Payload.After.Https);
-        Assert.Equal("http://before:8080", rollback.Payload.After.Http);
-        Assert.Equal("http://before:8443", rollback.Payload.After.Https);
+        Assert.Equal("http://target:7890", applyAfter.Https);
+        Assert.Equal("http://before:8080", rollbackAfter.Http);
+        Assert.Equal("http://before:8443", rollbackAfter.Https);
     }
 
     [Fact]
@@ -89,9 +92,11 @@ public class ProxyWorkflowServiceTests
             "http://127.0.0.1:7890",
             "http://127.0.0.1:7890",
             "127.0.0.1,localhost,::1");
+        var payload = result.Payload.GetPayload<GitProxyPlan>();
 
         Assert.Equal("proxy.plan", result.Command);
         Assert.Equal("git", result.Payload.Target);
+        Assert.Equal("git", payload.Target);
     }
 
     [Fact]
@@ -119,11 +124,49 @@ public class ProxyWorkflowServiceTests
             gitAdapter);
 
         var result = service.PlanGitDisable();
+        var payload = result.Payload.GetPayload<GitProxyPlan>();
 
         Assert.Equal("proxy.plan", result.Command);
         Assert.Equal("git", result.Payload.Target);
-        Assert.Equal("disable", result.Payload.Mode);
-        Assert.Equal(3, result.Payload.Actions.Count);
+        Assert.Equal("disable", payload.Mode);
+        Assert.Equal(3, payload.Actions.Count);
+    }
+
+    [Fact]
+    public void ProxyWorkflowService_can_apply_and_rollback_git_through_store_records()
+    {
+        var configStore = new FakeConfigStore();
+        var planStore = new FakePlanStore();
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter();
+        var clock = new FakeClock();
+        var gitAdapter = new FakeGitProxyAdapter(
+            new GitProxySnapshot(true, "global", "", "", ""));
+
+        var service = new TermForge.Core.Services.ProxyWorkflowService(
+            configStore,
+            planStore,
+            ledger,
+            environment,
+            clock,
+            gitAdapter);
+
+        var planEnvelope = service.PlanGitEnable(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:7890",
+            "127.0.0.1,localhost,::1");
+
+        var applied = service.Apply(planEnvelope.Payload.PlanId);
+        var rolledBack = service.Rollback(applied.Payload.ChangeId);
+        var appliedSnapshot = applied.Payload.GetAfter<GitProxySnapshot>();
+        var rolledBackSnapshot = rolledBack.Payload.GetAfter<GitProxySnapshot>();
+
+        Assert.Equal("proxy.apply", applied.Command);
+        Assert.Equal("proxy.rollback", rolledBack.Command);
+        Assert.Equal("git", applied.Payload.Target);
+        Assert.Equal("git", rolledBack.Payload.Target);
+        Assert.Equal("http://127.0.0.1:7890", appliedSnapshot.HttpProxy);
+        Assert.Equal(string.Empty, rolledBackSnapshot.HttpProxy);
     }
 
     [Fact]
@@ -154,9 +197,10 @@ public class ProxyWorkflowServiceTests
             "http://target:7890",
             "http://target:7891",
             "127.0.0.1");
+        var gitPlan = plan.Payload.GetPayload<GitProxyPlan>();
 
-        var apply = service.ApplyGit(plan.Payload);
-        var rollback = service.RollbackGit(plan.Payload.Before);
+        var apply = service.ApplyGit(gitPlan);
+        var rollback = service.RollbackGit(gitPlan.Before);
 
         Assert.Equal("proxy.apply", apply.Command);
         Assert.Equal("http://target:7890", apply.Payload.HttpProxy);
@@ -169,14 +213,14 @@ public class ProxyWorkflowServiceTests
 
 internal sealed class FakePlanStore : IPlanStore
 {
-    private readonly Dictionary<string, ProxyPlanPayload> _plans = new();
+    private readonly Dictionary<string, PlanRecord> _plans = new();
 
-    public ProxyPlanPayload? GetPlan(string planId)
+    public PlanRecord? GetPlanRecord(string planId)
     {
         return _plans.TryGetValue(planId, out var plan) ? plan : null;
     }
 
-    public void SavePlan(ProxyPlanPayload plan)
+    public void SavePlanRecord(PlanRecord plan)
     {
         _plans[plan.PlanId] = plan;
     }
@@ -184,14 +228,14 @@ internal sealed class FakePlanStore : IPlanStore
 
 internal sealed class FakeOperationLedger : IOperationLedger
 {
-    private readonly Dictionary<string, ProxyApplyPayload> _changes = new();
+    private readonly Dictionary<string, ChangeRecord> _changes = new();
 
-    public ProxyApplyPayload? GetChange(string changeId)
+    public ChangeRecord? GetChangeRecord(string changeId)
     {
         return _changes.TryGetValue(changeId, out var change) ? change : null;
     }
 
-    public void AppendChange(ProxyApplyPayload change)
+    public void AppendChangeRecord(ChangeRecord change)
     {
         _changes[change.ChangeId] = change;
     }

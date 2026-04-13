@@ -6,6 +6,7 @@ namespace TermForge.Core.Services;
 
 public sealed class ProxyWorkflowService
 {
+    private const string UnifiedSchemaVersion = "2026-04-13";
     private readonly IClock _clock;
     private readonly IConfigStore _configStore;
     private readonly IGitProxyAdapter? _gitAdapter;
@@ -35,50 +36,56 @@ public sealed class ProxyWorkflowService
         return Envelope("proxy.scan", payload);
     }
 
-    public CommandEnvelope<ProxyPlanPayload> PlanEnable(string httpProxy, string httpsProxy, string noProxy)
+    public CommandEnvelope<PlanRecord> PlanEnable(string httpProxy, string httpsProxy, string noProxy)
     {
         var current = _environmentAdapter.ReadEnvironmentProxy();
         var desired = NormalizeSnapshot(new ProxyConfigSnapshot(true, httpProxy, httpsProxy, noProxy));
         var payload = new ProxyPlanPayload(CreateId("plan"), "env", "enable", current, desired);
-        _planStore.SavePlan(payload);
-        return Envelope("proxy.plan", payload);
+        var record = CreatePlanRecord(payload.PlanId, payload.Target, "proxy-plan", payload);
+        _planStore.SavePlanRecord(record);
+        return Envelope("proxy.plan", record);
     }
 
-    public CommandEnvelope<ProxyApplyPayload> Apply(string planId)
+    public CommandEnvelope<ChangeRecord> Apply(string planId)
     {
-        var plan = _planStore.GetPlan(planId) ?? throw new InvalidOperationException($"Plan not found: {planId}");
-        _environmentAdapter.ApplyEnvironmentProxy(plan.Desired);
-        var applied = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
-        _configStore.WriteProxyConfig(applied);
+        var plan = _planStore.GetPlanRecord(planId) ?? throw new InvalidOperationException($"Plan not found: {planId}");
+        var change = plan.Target switch
+        {
+            "env" => ApplyEnvironmentPlan(plan),
+            "git" => ApplyGitPlan(plan),
+            _ => throw new InvalidOperationException($"Unsupported plan target: {plan.Target}")
+        };
 
-        var payload = new ProxyApplyPayload(CreateId("change"), plan.PlanId, plan.Target, applied);
-        _ledger.AppendChange(payload);
-        return Envelope("proxy.apply", payload);
+        return Envelope("proxy.apply", change);
     }
 
-    public CommandEnvelope<ProxyApplyPayload> Rollback(string changeId)
+    public CommandEnvelope<ChangeRecord> Rollback(string changeId)
     {
-        var change = _ledger.GetChange(changeId) ?? throw new InvalidOperationException($"Change not found: {changeId}");
-        var plan = _planStore.GetPlan(change.PlanId) ?? throw new InvalidOperationException($"Plan not found: {change.PlanId}");
-        _environmentAdapter.ApplyEnvironmentProxy(plan.Before);
-        var reverted = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
-        _configStore.WriteProxyConfig(reverted);
+        var change = _ledger.GetChangeRecord(changeId) ?? throw new InvalidOperationException($"Change not found: {changeId}");
+        var rollback = change.Target switch
+        {
+            "env" => RollbackEnvironmentChange(change),
+            "git" => RollbackGitChange(change),
+            _ => throw new InvalidOperationException($"Unsupported change target: {change.Target}")
+        };
 
-        var payload = new ProxyApplyPayload(CreateId("change"), plan.PlanId, change.Target, reverted);
-        _ledger.AppendChange(payload);
-        return Envelope("proxy.rollback", payload);
+        return Envelope("proxy.rollback", rollback);
     }
 
-    public CommandEnvelope<GitProxyPlan> PlanGitEnable(string httpProxy, string httpsProxy, string noProxy)
+    public CommandEnvelope<PlanRecord> PlanGitEnable(string httpProxy, string httpsProxy, string noProxy)
     {
         var payload = GetGitAdapter().PlanEnable(httpProxy, httpsProxy, noProxy);
-        return Envelope("proxy.plan", payload);
+        var record = CreatePlanRecord(CreateId("plan"), payload.Target, "git-proxy-plan", payload);
+        _planStore.SavePlanRecord(record);
+        return Envelope("proxy.plan", record);
     }
 
-    public CommandEnvelope<GitProxyPlan> PlanGitDisable()
+    public CommandEnvelope<PlanRecord> PlanGitDisable()
     {
         var payload = GetGitAdapter().PlanDisable();
-        return Envelope("proxy.plan", payload);
+        var record = CreatePlanRecord(CreateId("plan"), payload.Target, "git-proxy-plan", payload);
+        _planStore.SavePlanRecord(record);
+        return Envelope("proxy.plan", record);
     }
 
     public CommandEnvelope<GitProxySnapshot> ApplyGit(GitProxyPlan plan)
@@ -111,9 +118,92 @@ public sealed class ProxyWorkflowService
         return $"{prefix}-{_clock.NowText()}-{Guid.NewGuid():N}";
     }
 
+    private ChangeRecord ApplyEnvironmentPlan(PlanRecord record)
+    {
+        var plan = record.ToProxyPlanPayload();
+        _environmentAdapter.ApplyEnvironmentProxy(plan.Desired);
+        var applied = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
+        _configStore.WriteProxyConfig(applied);
+
+        var change = CreateChangeRecord(
+            plan.Target,
+            plan.PlanId,
+            "proxy-apply",
+            plan.Before,
+            applied);
+
+        _ledger.AppendChangeRecord(change);
+        return change;
+    }
+
+    private ChangeRecord ApplyGitPlan(PlanRecord record)
+    {
+        var adapter = GetGitAdapter();
+        var plan = record.ToGitProxyPlan();
+        adapter.Apply(plan);
+        var applied = adapter.Verify(plan.Desired);
+
+        var change = CreateChangeRecord(
+            plan.Target,
+            record.PlanId,
+            "git-proxy-apply",
+            plan.Before,
+            applied);
+
+        _ledger.AppendChangeRecord(change);
+        return change;
+    }
+
+    private ChangeRecord RollbackEnvironmentChange(ChangeRecord change)
+    {
+        _ = _planStore.GetPlanRecord(change.PlanId) ?? throw new InvalidOperationException($"Plan not found: {change.PlanId}");
+        var beforeRollback = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
+        _environmentAdapter.ApplyEnvironmentProxy(change.GetBefore<ProxyConfigSnapshot>());
+        var reverted = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
+        _configStore.WriteProxyConfig(reverted);
+
+        var rollback = CreateChangeRecord(
+            change.Target,
+            change.PlanId,
+            "proxy-rollback",
+            beforeRollback,
+            reverted);
+
+        _ledger.AppendChangeRecord(rollback);
+        return rollback;
+    }
+
+    private ChangeRecord RollbackGitChange(ChangeRecord change)
+    {
+        _ = _planStore.GetPlanRecord(change.PlanId) ?? throw new InvalidOperationException($"Plan not found: {change.PlanId}");
+        var adapter = GetGitAdapter();
+        var beforeRollback = adapter.ReadCurrent();
+        var reverted = adapter.Rollback(change.GetBefore<GitProxySnapshot>());
+
+        var rollback = CreateChangeRecord(
+            change.Target,
+            change.PlanId,
+            "git-proxy-rollback",
+            beforeRollback,
+            reverted);
+
+        _ledger.AppendChangeRecord(rollback);
+        return rollback;
+    }
+
     private IGitProxyAdapter GetGitAdapter()
     {
         return _gitAdapter ?? throw new InvalidOperationException("Git proxy adapter is not configured.");
+    }
+
+    private PlanRecord CreatePlanRecord(string planId, string target, string payloadType, object payload)
+    {
+        return new PlanRecord(planId, target, UnifiedSchemaVersion, _clock.NowText(), payloadType, payload);
+    }
+
+    private ChangeRecord CreateChangeRecord(string target, string planId, string payloadType, object before, object after)
+    {
+        return new ChangeRecord(CreateId("change"), target, planId, UnifiedSchemaVersion, _clock.NowText(), payloadType, before, after);
     }
 
     private static ProxyConfigSnapshot NormalizeSnapshot(ProxyConfigSnapshot snapshot)

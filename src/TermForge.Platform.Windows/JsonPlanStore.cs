@@ -14,16 +14,6 @@ public sealed class JsonPlanStore : IPlanStore
         _path = path;
     }
 
-    public ProxyPlanPayload? GetPlan(string planId)
-    {
-        return GetPlanRecord(planId)?.ToProxyPlanPayload();
-    }
-
-    public void SavePlan(ProxyPlanPayload plan)
-    {
-        SavePlanRecord(plan);
-    }
-
     public PlanRecord? GetPlanRecord(string planId)
     {
         return ReadPlans().FirstOrDefault(plan => string.Equals(plan.PlanId, planId, StringComparison.Ordinal));

@@ -6,5 +6,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\TermForge.Core\TermForge.Core.csproj" />
+    <ProjectReference Include="..\..\src\TermForge.Platform.Windows\TermForge.Platform.Windows.csproj" />
   </ItemGroup>
 </Project>
