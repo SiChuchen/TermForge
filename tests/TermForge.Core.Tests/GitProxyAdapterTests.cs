@@ -1,6 +1,8 @@
 using TermForge.Contracts;
 using TermForge.Platform;
 using Xunit;
+using System.Diagnostics;
+using System.Reflection;
 
 namespace TermForge.Core.Tests;
 
@@ -40,6 +42,94 @@ public class GitProxyAdapterTests
         Assert.Equal("git", plan.Target);
         Assert.Equal("enable", plan.Mode);
         Assert.Equal(3, plan.Actions.Count);
+    }
+
+    [Fact]
+    public void WindowsGitProxyAdapter_read_current_treats_missing_key_as_empty()
+    {
+        var adapter = WindowsGitProxyAdapterTestHarness.CreateWindowsAdapter(
+            () => "git.exe",
+            (_, args) =>
+            {
+                Assert.Equal(new[] { "config", "--global", "--get" }, args.Take(3).ToArray());
+                return args[3] switch
+                {
+                    "http.proxy" => (1, "", ""),
+                    "https.proxy" => (0, "http://127.0.0.1:7890", ""),
+                    "http.noProxy" => (0, "localhost,127.0.0.1", ""),
+                    _ => throw new InvalidOperationException("unexpected key")
+                };
+            });
+
+        var snapshot = adapter.ReadCurrent();
+
+        Assert.Equal(string.Empty, snapshot.HttpProxy);
+        Assert.Equal("http://127.0.0.1:7890", snapshot.HttpsProxy);
+        Assert.Equal("localhost,127.0.0.1", snapshot.NoProxy);
+    }
+
+    [Fact]
+    public void WindowsGitProxyAdapter_read_current_throws_when_git_config_is_broken()
+    {
+        var adapter = WindowsGitProxyAdapterTestHarness.CreateWindowsAdapter(
+            () => "git.exe",
+            (_, args) => args[3] switch
+            {
+                "http.proxy" => (128, "", "fatal: bad config line 1 in file .gitconfig"),
+                _ => throw new InvalidOperationException("unexpected key")
+            });
+
+        Action act = () => adapter.ReadCurrent();
+        var error = Assert.Throws<InvalidOperationException>(act);
+
+        Assert.Contains("bad config", error.Message);
+    }
+
+    [Theory]
+    [InlineData("env", "set", "http.proxy")]
+    [InlineData("git", "append", "http.proxy")]
+    [InlineData("git", "set", "credential.helper")]
+    public void WindowsGitProxyAdapter_apply_rejects_invalid_plan_shapes(string target, string action, string key)
+    {
+        var adapter = WindowsGitProxyAdapterTestHarness.CreateWindowsAdapter(
+            () => "git.exe",
+            (_, _) => (0, "", ""));
+
+        var plan = new GitProxyPlan(
+            target,
+            "enable",
+            new GitProxySnapshot(true, "global", "", "", ""),
+            new GitProxySnapshot(true, "global", "http://127.0.0.1:7890", "", ""),
+            new[] { new GitProxyPlanAction(key, action, "", "http://127.0.0.1:7890") });
+
+        Action act = () => adapter.Apply(plan);
+        Assert.Throws<InvalidOperationException>(act);
+    }
+
+    [Fact]
+    public void WindowsGitProxyAdapter_apply_passes_value_as_single_argv_token()
+    {
+        var seenCalls = new List<IReadOnlyList<string>>();
+        var adapter = WindowsGitProxyAdapterTestHarness.CreateWindowsAdapter(
+            () => "git.exe",
+            (_, args) =>
+            {
+                seenCalls.Add(args.ToArray());
+                return args[2] == "--get" ? (1, "", "") : (0, "", "");
+            });
+
+        var plan = new GitProxyPlan(
+            "git",
+            "enable",
+            new GitProxySnapshot(true, "global", "", "", ""),
+            new GitProxySnapshot(true, "global", "http://proxy host:7890", "", ""),
+            new[] { new GitProxyPlanAction("http.proxy", "set", "", "http://proxy host:7890") });
+
+        adapter.Apply(plan);
+
+        Assert.Contains(
+            seenCalls,
+            args => args.SequenceEqual(new[] { "config", "--global", "http.proxy", "http://proxy host:7890" }));
     }
 }
 
@@ -119,5 +209,60 @@ internal sealed class FakeGitProxyAdapter : IGitProxyAdapter
 
         var action = string.IsNullOrWhiteSpace(after) ? "unset" : "set";
         actions.Add(new GitProxyPlanAction(key, action, before, after));
+    }
+}
+
+internal static class WindowsGitProxyAdapterTestHarness
+{
+    public static IGitProxyAdapter CreateWindowsAdapter(
+        Func<string?> resolveGitExecutable,
+        Func<string, IReadOnlyList<string>, (int ExitCode, string StdOut, string StdErr)> runGit)
+    {
+        BuildWindowsAssembly();
+
+        var assembly = Assembly.LoadFrom(GetWindowsAssemblyPath());
+        var adapterType = assembly.GetType("TermForge.Platform.Windows.WindowsGitProxyAdapter", throwOnError: true)!;
+        var constructor = adapterType.GetConstructors()
+            .Single(ctor => ctor.GetParameters().Length == 2);
+
+        return (IGitProxyAdapter)constructor.Invoke(new object[]
+        {
+            resolveGitExecutable,
+            runGit
+        });
+    }
+
+    private static void BuildWindowsAssembly()
+    {
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add("build");
+        startInfo.ArgumentList.Add(GetWindowsProjectPath());
+        startInfo.ArgumentList.Add("--nologo");
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("failed to start dotnet build");
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"failed to build windows adapter assembly{Environment.NewLine}{stdout}{Environment.NewLine}{stderr}".Trim());
+        }
+    }
+
+    private static string GetWindowsProjectPath()
+    {
+        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "TermForge.Platform.Windows", "TermForge.Platform.Windows.csproj"));
+    }
+
+    private static string GetWindowsAssemblyPath()
+    {
+        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "TermForge.Platform.Windows", "bin", "Debug", "net8.0", "TermForge.Platform.Windows.dll"));
     }
 }

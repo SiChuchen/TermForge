@@ -6,14 +6,32 @@ namespace TermForge.Platform.Windows;
 
 public sealed class WindowsGitProxyAdapter : IGitProxyAdapter
 {
+    private static readonly HashSet<string> ManagedKeys = new(StringComparer.Ordinal)
+    {
+        "http.proxy",
+        "https.proxy",
+        "http.noProxy"
+    };
+
+    private readonly Func<string?> _resolveGitExecutable;
+    private readonly Func<string, IReadOnlyList<string>, (int ExitCode, string StdOut, string StdErr)> _runGit;
+
+    public WindowsGitProxyAdapter(
+        Func<string?>? resolveGitExecutable = null,
+        Func<string, IReadOnlyList<string>, (int ExitCode, string StdOut, string StdErr)>? runGit = null)
+    {
+        _resolveGitExecutable = resolveGitExecutable ?? ResolveGitExecutable;
+        _runGit = runGit ?? RunGitProcess;
+    }
+
     public bool IsAvailable()
     {
-        return ResolveGitExecutable() is not null;
+        return _resolveGitExecutable() is not null;
     }
 
     public GitProxySnapshot ReadCurrent()
     {
-        var git = ResolveGitExecutable();
+        var git = _resolveGitExecutable();
         if (git is null)
         {
             return new GitProxySnapshot(false, "global", string.Empty, string.Empty, string.Empty);
@@ -43,16 +61,18 @@ public sealed class WindowsGitProxyAdapter : IGitProxyAdapter
 
     public GitProxySnapshot Apply(GitProxyPlan plan)
     {
-        var git = ResolveGitExecutable() ?? throw new InvalidOperationException("git not available");
+        ValidatePlan(plan);
+
+        var git = _resolveGitExecutable() ?? throw new InvalidOperationException("git not available");
         foreach (var action in plan.Actions)
         {
             if (action.Action == "set")
             {
-                RunGit(git, $"config --global {action.Key} {EscapeValue(action.After)}");
+                ExecuteGit(git, new[] { "config", "--global", action.Key, action.After });
             }
             else if (action.Action == "unset")
             {
-                RunGit(git, $"config --global --unset {action.Key}", ignoreFailure: true);
+                ExecuteGit(git, new[] { "config", "--global", "--unset", action.Key }, ignoreFailure: true);
             }
         }
 
@@ -99,6 +119,28 @@ public sealed class WindowsGitProxyAdapter : IGitProxyAdapter
         actions.Add(new GitProxyPlanAction(key, action, before, after));
     }
 
+    private static void ValidatePlan(GitProxyPlan plan)
+    {
+        if (!string.Equals(plan.Target, "git", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("git proxy plan target must be 'git'");
+        }
+
+        foreach (var action in plan.Actions)
+        {
+            if (!string.Equals(action.Action, "set", StringComparison.Ordinal) &&
+                !string.Equals(action.Action, "unset", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"unsupported git proxy action '{action.Action}'");
+            }
+
+            if (!ManagedKeys.Contains(action.Key))
+            {
+                throw new InvalidOperationException($"unsupported git proxy key '{action.Key}'");
+            }
+        }
+    }
+
     private static string? ResolveGitExecutable()
     {
         var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
@@ -115,14 +157,39 @@ public sealed class WindowsGitProxyAdapter : IGitProxyAdapter
         return null;
     }
 
-    private static string ReadKey(string git, string key)
+    private string ReadKey(string git, string key)
     {
-        return RunGit(git, $"config --global --get {key}", ignoreFailure: true).Trim();
+        var result = _runGit(git, new[] { "config", "--global", "--get", key });
+        if (result.ExitCode == 0)
+        {
+            return result.StdOut.Trim();
+        }
+
+        if (result.ExitCode == 1 && string.IsNullOrWhiteSpace(result.StdErr))
+        {
+            return string.Empty;
+        }
+
+        throw new InvalidOperationException(
+            string.IsNullOrWhiteSpace(result.StdErr)
+                ? $"failed to read git config key '{key}'"
+                : result.StdErr.Trim());
     }
 
-    private static string RunGit(string git, string arguments, bool ignoreFailure = false)
+    private string ExecuteGit(string git, IReadOnlyList<string> arguments, bool ignoreFailure = false)
     {
-        var startInfo = new ProcessStartInfo(git, arguments)
+        var result = _runGit(git, arguments);
+        if (result.ExitCode != 0 && !ignoreFailure)
+        {
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.StdErr) ? "git command failed" : result.StdErr.Trim());
+        }
+
+        return result.StdOut;
+    }
+
+    private static (int ExitCode, string StdOut, string StdErr) RunGitProcess(string git, IReadOnlyList<string> arguments)
+    {
+        var startInfo = new ProcessStartInfo(git)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -130,21 +197,16 @@ public sealed class WindowsGitProxyAdapter : IGitProxyAdapter
             CreateNoWindow = true
         };
 
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("failed to start git");
         var stdout = process.StandardOutput.ReadToEnd();
         var stderr = process.StandardError.ReadToEnd();
         process.WaitForExit();
 
-        if (process.ExitCode != 0 && !ignoreFailure)
-        {
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "git command failed" : stderr.Trim());
-        }
-
-        return stdout;
-    }
-
-    private static string EscapeValue(string value)
-    {
-        return value.Contains(' ') ? $"\"{value}\"" : value;
+        return (process.ExitCode, stdout, stderr);
     }
 }
