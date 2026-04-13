@@ -157,6 +157,33 @@ public class ProxyWorkflowServiceTests
     }
 
     [Fact]
+    public void ProxyWorkflowService_plans_composite_env_git_enable_in_fixed_order()
+    {
+        var service = new TermForge.Core.Services.ProxyWorkflowService(
+            new FakeConfigStore(),
+            new FakePlanStore(),
+            new FakeOperationLedger(),
+            new FakePlatformEnvironmentAdapter(
+                new ProxyConfigSnapshot(true, "http://env:8080", "http://env:8443", "env.local")),
+            new FakeClock(),
+            new FakeGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", "")));
+
+        var result = service.PlanCompositeEnable(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:7890",
+            "127.0.0.1,localhost,::1");
+
+        var payload = result.Payload.GetPayload<CompositeProxyPlan>();
+
+        Assert.Equal("composite", result.Payload.Target);
+        Assert.Equal(new[] { "env", "git" }, payload.Targets);
+        Assert.Collection(
+            payload.Plans,
+            plan => Assert.Equal("env", plan.Target),
+            plan => Assert.Equal("git", plan.Target));
+    }
+
+    [Fact]
     public void ProxyWorkflowService_can_apply_and_rollback_git_through_store_records()
     {
         var configStore = new FakeConfigStore();

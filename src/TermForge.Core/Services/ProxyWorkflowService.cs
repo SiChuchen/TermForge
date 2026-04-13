@@ -56,6 +56,28 @@ public sealed class ProxyWorkflowService
         return Envelope("proxy.plan", record);
     }
 
+    public CommandEnvelope<PlanRecord> PlanCompositeEnable(string httpProxy, string httpsProxy, string noProxy)
+    {
+        var planId = CreateId("plan");
+        var envPlan = new ProxyPlanPayload(
+            planId,
+            "env",
+            "enable",
+            _environmentAdapter.ReadEnvironmentProxy(),
+            NormalizeSnapshot(new ProxyConfigSnapshot(true, httpProxy, httpsProxy, noProxy)));
+        var gitPlan = GetGitAdapter().PlanEnable(httpProxy, httpsProxy, noProxy);
+        var composite = new CompositeProxyPlan(
+            ["env", "git"],
+            "enable",
+            [
+                new CompositeTargetPlan("env", "proxy-plan", envPlan),
+                new CompositeTargetPlan("git", "git-proxy-plan", gitPlan)
+            ]);
+        var record = CreatePlanRecord(planId, "composite", "composite-proxy-plan", composite);
+        _planStore.SavePlanRecord(record);
+        return Envelope("proxy.plan", record);
+    }
+
     public CommandEnvelope<ChangeRecord> Apply(string planId)
     {
         var plan = _planStore.GetPlanRecord(planId) ?? throw new InvalidOperationException($"Plan not found: {planId}");

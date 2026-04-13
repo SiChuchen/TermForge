@@ -32,6 +32,11 @@ public sealed record PlanRecord(
         return UnifiedStoreValueReader.Deserialize<GitProxyPlan>(Payload) with { Target = Target };
     }
 
+    public CompositeProxyPlan ToCompositeProxyPlan()
+    {
+        return UnifiedStoreValueReader.Deserialize<CompositeProxyPlan>(Payload);
+    }
+
     public static implicit operator PlanRecord(ProxyPlanPayload payload)
     {
         return new PlanRecord(
