@@ -67,7 +67,7 @@ public class ProxyWorkflowServiceTests
     }
 
     [Fact]
-    public void ProxyWorkflowService_can_plan_git_enable_operation()
+    public void ProxyWorkflowService_GitProxy_can_plan_git_enable_operation()
     {
         var configStore = new FakeConfigStore();
         var planStore = new FakePlanStore();
