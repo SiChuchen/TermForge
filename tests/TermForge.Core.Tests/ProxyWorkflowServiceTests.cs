@@ -1,7 +1,10 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using TermForge.Contracts;
 using TermForge.Core.Interfaces;
 using TermForge.Platform;
+using TermForge.Platform.Windows;
 using Xunit;
 
 namespace TermForge.Core.Tests;
@@ -184,6 +187,185 @@ public class ProxyWorkflowServiceTests
     }
 
     [Fact]
+    public void ProxyWorkflowService_compensates_env_when_git_apply_fails_in_composite_apply()
+    {
+        var configStore = new FakeConfigStore();
+        var planStore = new FakePlanStore();
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter(
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""))
+        {
+            ThrowOnApply = true
+        };
+        var service = new TermForge.Core.Services.ProxyWorkflowService(
+            configStore,
+            planStore,
+            ledger,
+            environment,
+            new FakeClock(),
+            gitAdapter);
+
+        var plan = service.PlanCompositeEnable(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:7890",
+            "127.0.0.1,localhost,::1");
+
+        var error = Assert.Throws<InvalidOperationException>(() => service.Apply(plan.Payload.PlanId));
+
+        Assert.Contains("git", error.Message);
+        Assert.False(environment.Current.Enabled);
+        Assert.Equal(0, ledger.Count);
+    }
+
+    [Fact]
+    public void ProxyWorkflowService_applies_composite_env_git_successfully()
+    {
+        var configStore = new FakeConfigStore();
+        var planStore = new FakePlanStore();
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter(
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""));
+        var service = new TermForge.Core.Services.ProxyWorkflowService(
+            configStore,
+            planStore,
+            ledger,
+            environment,
+            new FakeClock(),
+            gitAdapter);
+
+        var plan = service.PlanCompositeEnable(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:7890",
+            "127.0.0.1,localhost,::1");
+
+        var apply = service.Apply(plan.Payload.PlanId);
+        var payload = apply.Payload.GetAfter<CompositeProxyChange>();
+
+        Assert.Equal("composite", apply.Payload.Target);
+        Assert.Equal("composite-proxy-change", apply.Payload.PayloadType);
+        Assert.False(payload.RollbackTriggered);
+        Assert.Null(payload.FailureTarget);
+        Assert.Equal(new[] { "env", "git" }, payload.Targets);
+        Assert.Collection(
+            payload.Changes,
+            change => Assert.Equal("env", change.Target),
+            change => Assert.Equal("git", change.Target));
+        Assert.True(environment.Current.Enabled);
+        Assert.Equal("http://127.0.0.1:7890", gitAdapter.Current.HttpProxy);
+        Assert.Equal(1, ledger.Count);
+    }
+
+    [Fact]
+    public void ProxyWorkflowService_rolls_back_composite_change_in_reverse_order()
+    {
+        var configStore = new FakeConfigStore();
+        var planStore = new FakePlanStore();
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter(
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""));
+        var service = new TermForge.Core.Services.ProxyWorkflowService(
+            configStore,
+            planStore,
+            ledger,
+            environment,
+            new FakeClock(),
+            gitAdapter);
+
+        var plan = service.PlanCompositeEnable(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:7890",
+            "127.0.0.1,localhost,::1");
+
+        var apply = service.Apply(plan.Payload.PlanId);
+        var rollback = service.Rollback(apply.Payload.ChangeId);
+        var payload = rollback.Payload.GetAfter<CompositeProxyChange>();
+
+        Assert.Equal("composite", rollback.Payload.Target);
+        Assert.Equal("composite-proxy-change", rollback.Payload.PayloadType);
+        Assert.Equal(new[] { "env", "git" }, payload.Targets);
+        Assert.Collection(
+            payload.Changes,
+            change => Assert.Equal("git", change.Target),
+            change => Assert.Equal("env", change.Target));
+        Assert.False(environment.Current.Enabled);
+        Assert.Equal(string.Empty, gitAdapter.Current.HttpProxy);
+        Assert.Equal(2, ledger.Count);
+    }
+
+    [Fact]
+    public void ProxyWorkflowService_applies_and_rolls_back_reloaded_composite_records_from_json_store()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "termforge-composite-store-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var configStore = new FakeConfigStore();
+            var environment = new FakePlatformEnvironmentAdapter(
+                new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+            var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""));
+            var clock = new FakeClock();
+            var planStorePath = Path.Combine(root, "plans.json");
+            var ledgerPath = Path.Combine(root, "ledger.json");
+
+            var writerService = new TermForge.Core.Services.ProxyWorkflowService(
+                configStore,
+                new JsonPlanStore(planStorePath),
+                new JsonOperationLedger(ledgerPath),
+                environment,
+                clock,
+                gitAdapter);
+
+            var plan = writerService.PlanCompositeEnable(
+                "http://127.0.0.1:7890",
+                "http://127.0.0.1:7890",
+                "127.0.0.1,localhost,::1");
+
+            var readerService = new TermForge.Core.Services.ProxyWorkflowService(
+                configStore,
+                new JsonPlanStore(planStorePath),
+                new JsonOperationLedger(ledgerPath),
+                environment,
+                clock,
+                gitAdapter);
+
+            var apply = readerService.Apply(plan.Payload.PlanId);
+            var applyPayload = apply.Payload.GetAfter<CompositeProxyChange>();
+
+            var rollbackService = new TermForge.Core.Services.ProxyWorkflowService(
+                configStore,
+                new JsonPlanStore(planStorePath),
+                new JsonOperationLedger(ledgerPath),
+                environment,
+                clock,
+                gitAdapter);
+
+            var rollback = rollbackService.Rollback(apply.Payload.ChangeId);
+            var rollbackPayload = rollback.Payload.GetAfter<CompositeProxyChange>();
+
+            Assert.Equal("composite", apply.Payload.Target);
+            Assert.Collection(
+                applyPayload.Changes,
+                change => Assert.Equal("env", change.Target),
+                change => Assert.Equal("git", change.Target));
+            Assert.Equal("composite", rollback.Payload.Target);
+            Assert.Collection(
+                rollbackPayload.Changes,
+                change => Assert.Equal("git", change.Target),
+                change => Assert.Equal("env", change.Target));
+            Assert.False(environment.Current.Enabled);
+            Assert.Equal(string.Empty, gitAdapter.Current.HttpProxy);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void ProxyWorkflowService_can_apply_and_rollback_git_through_store_records()
     {
         var configStore = new FakeConfigStore();
@@ -281,6 +463,8 @@ internal sealed class FakeOperationLedger : IOperationLedger
 {
     private readonly Dictionary<string, ChangeRecord> _changes = new();
 
+    public int Count => _changes.Count;
+
     public ChangeRecord? GetChangeRecord(string changeId)
     {
         return _changes.TryGetValue(changeId, out var change) ? change : null;
@@ -324,5 +508,97 @@ internal sealed class FakeClock : IClock
     public string NowText()
     {
         return Value;
+    }
+}
+
+internal sealed class InjectableGitProxyAdapter : IGitProxyAdapter
+{
+    public InjectableGitProxyAdapter(GitProxySnapshot current)
+    {
+        Current = current;
+    }
+
+    public GitProxySnapshot Current { get; private set; }
+
+    public bool ThrowOnApply { get; set; }
+
+    public bool ThrowOnVerify { get; set; }
+
+    public bool IsAvailable()
+    {
+        return Current.Available;
+    }
+
+    public GitProxySnapshot ReadCurrent()
+    {
+        return Current;
+    }
+
+    public GitProxyPlan PlanEnable(string httpProxy, string httpsProxy, string noProxy)
+    {
+        var before = ReadCurrent();
+        var desired = new GitProxySnapshot(true, "global", httpProxy, httpsProxy, noProxy);
+        return BuildPlan("enable", before, desired);
+    }
+
+    public GitProxyPlan PlanDisable()
+    {
+        var before = ReadCurrent();
+        var desired = new GitProxySnapshot(before.Available, "global", string.Empty, string.Empty, string.Empty);
+        return BuildPlan("disable", before, desired);
+    }
+
+    public GitProxySnapshot Apply(GitProxyPlan plan)
+    {
+        if (ThrowOnApply)
+        {
+            throw new InvalidOperationException("git apply failed");
+        }
+
+        Current = plan.Desired;
+        return Current;
+    }
+
+    public GitProxySnapshot Verify(GitProxySnapshot desired)
+    {
+        if (ThrowOnVerify)
+        {
+            throw new InvalidOperationException("git verify failed");
+        }
+
+        if (Current.HttpProxy != desired.HttpProxy ||
+            Current.HttpsProxy != desired.HttpsProxy ||
+            Current.NoProxy != desired.NoProxy)
+        {
+            throw new InvalidOperationException("git proxy verification failed");
+        }
+
+        return Current;
+    }
+
+    public GitProxySnapshot Rollback(GitProxySnapshot before)
+    {
+        Current = before;
+        return before;
+    }
+
+    private static GitProxyPlan BuildPlan(string mode, GitProxySnapshot before, GitProxySnapshot desired)
+    {
+        var actions = new List<GitProxyPlanAction>();
+        AddAction(actions, "http.proxy", before.HttpProxy, desired.HttpProxy);
+        AddAction(actions, "https.proxy", before.HttpsProxy, desired.HttpsProxy);
+        AddAction(actions, "http.noProxy", before.NoProxy, desired.NoProxy);
+        return new GitProxyPlan("git", mode, before, desired, actions);
+    }
+
+    private static void AddAction(List<GitProxyPlanAction> actions, string key, string before, string after)
+    {
+        if (before == after)
+        {
+            return;
+        }
+
+        var action = string.IsNullOrWhiteSpace(after) ? "unset" : "set";
+        actions.Add(new GitProxyPlanAction(key, action, before, after));
     }
 }

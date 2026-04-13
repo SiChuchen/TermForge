@@ -7,6 +7,8 @@ namespace TermForge.Core.Services;
 public sealed class ProxyWorkflowService
 {
     private const string UnifiedSchemaVersion = "2026-04-13";
+    private static readonly string[] CompositeApplyOrder = ["env", "git"];
+    private static readonly string[] CompositeRollbackOrder = ["git", "env"];
     private readonly IClock _clock;
     private readonly IConfigStore _configStore;
     private readonly IGitProxyAdapter? _gitAdapter;
@@ -78,6 +80,28 @@ public sealed class ProxyWorkflowService
         return Envelope("proxy.plan", record);
     }
 
+    public CommandEnvelope<PlanRecord> PlanCompositeDisable()
+    {
+        var planId = CreateId("plan");
+        var envPlan = new ProxyPlanPayload(
+            planId,
+            "env",
+            "disable",
+            _environmentAdapter.ReadEnvironmentProxy(),
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var gitPlan = GetGitAdapter().PlanDisable();
+        var composite = new CompositeProxyPlan(
+            ["env", "git"],
+            "disable",
+            [
+                new CompositeTargetPlan("env", "proxy-plan", envPlan),
+                new CompositeTargetPlan("git", "git-proxy-plan", gitPlan)
+            ]);
+        var record = CreatePlanRecord(planId, "composite", "composite-proxy-plan", composite);
+        _planStore.SavePlanRecord(record);
+        return Envelope("proxy.plan", record);
+    }
+
     public CommandEnvelope<ChangeRecord> Apply(string planId)
     {
         var plan = _planStore.GetPlanRecord(planId) ?? throw new InvalidOperationException($"Plan not found: {planId}");
@@ -85,6 +109,7 @@ public sealed class ProxyWorkflowService
         {
             "env" => ApplyEnvironmentPlan(plan),
             "git" => ApplyGitPlan(plan),
+            "composite" => ApplyCompositePlan(plan),
             _ => throw new InvalidOperationException($"Unsupported plan target: {plan.Target}")
         };
 
@@ -98,6 +123,7 @@ public sealed class ProxyWorkflowService
         {
             "env" => RollbackEnvironmentChange(change),
             "git" => RollbackGitChange(change),
+            "composite" => RollbackCompositeChange(change),
             _ => throw new InvalidOperationException($"Unsupported change target: {change.Target}")
         };
 
@@ -168,6 +194,48 @@ public sealed class ProxyWorkflowService
         return change;
     }
 
+    private ChangeRecord ApplyCompositePlan(PlanRecord record)
+    {
+        var compositePlan = record.ToCompositeProxyPlan();
+        var orderedPlans = OrderCompositePlans(compositePlan);
+        var appliedChanges = new List<CompositeTargetChange>();
+
+        foreach (var targetPlan in orderedPlans)
+        {
+            try
+            {
+                var targetChange = targetPlan.Target switch
+                {
+                    "env" => ApplyCompositeEnvironmentPlan(targetPlan.ToProxyPlanPayload()),
+                    "git" => ApplyCompositeGitPlan(targetPlan.ToGitProxyPlan()),
+                    _ => throw new InvalidOperationException($"Unsupported composite target: {targetPlan.Target}")
+                };
+
+                appliedChanges.Add(targetChange);
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    CompensateCompositeChanges(appliedChanges);
+                }
+                catch (Exception compensationEx)
+                {
+                    throw new InvalidOperationException(
+                        $"Composite apply failed at {targetPlan.Target}: {ex.Message}. Compensation rollback failed: {compensationEx.Message}",
+                        compensationEx);
+                }
+
+                throw new InvalidOperationException($"Composite apply failed at {targetPlan.Target}: {ex.Message}", ex);
+            }
+        }
+
+        var payload = new CompositeProxyChange(CompositeApplyOrder, compositePlan.Mode, appliedChanges, false, null);
+        var change = CreateCompositeChangeRecord(record.PlanId, payload);
+        _ledger.AppendChangeRecord(change);
+        return change;
+    }
+
     private ChangeRecord ApplyGitPlan(PlanRecord record)
     {
         var adapter = GetGitAdapter();
@@ -223,6 +291,33 @@ public sealed class ProxyWorkflowService
         return rollback;
     }
 
+    private ChangeRecord RollbackCompositeChange(ChangeRecord change)
+    {
+        _ = _planStore.GetPlanRecord(change.PlanId) ?? throw new InvalidOperationException($"Plan not found: {change.PlanId}");
+        var compositeChange = change.GetAfter<CompositeProxyChange>();
+        var rollbackChanges = new List<CompositeTargetChange>();
+
+        foreach (var target in CompositeRollbackOrder)
+        {
+            var targetChange = compositeChange.Changes.FirstOrDefault(entry => string.Equals(entry.Target, target, StringComparison.Ordinal))
+                ?? throw new InvalidOperationException($"Composite change is missing target '{target}'.");
+
+            var rollbackChange = target switch
+            {
+                "env" => RollbackCompositeEnvironment(targetChange),
+                "git" => RollbackCompositeGit(targetChange),
+                _ => throw new InvalidOperationException($"Unsupported composite target: {target}")
+            };
+
+            rollbackChanges.Add(rollbackChange);
+        }
+
+        var payload = new CompositeProxyChange(compositeChange.Targets, compositeChange.Mode, rollbackChanges, false, null);
+        var rollback = CreateCompositeChangeRecord(change.PlanId, payload);
+        _ledger.AppendChangeRecord(rollback);
+        return rollback;
+    }
+
     private IGitProxyAdapter GetGitAdapter()
     {
         return _gitAdapter ?? throw new InvalidOperationException("Git proxy adapter is not configured.");
@@ -238,11 +333,106 @@ public sealed class ProxyWorkflowService
         return new ChangeRecord(CreateId("change"), target, planId, UnifiedSchemaVersion, _clock.NowText(), payloadType, before, after);
     }
 
+    private ChangeRecord CreateCompositeChangeRecord(string planId, CompositeProxyChange payload)
+    {
+        return CreateChangeRecord("composite", planId, "composite-proxy-change", payload, payload);
+    }
+
     private static ProxyConfigSnapshot NormalizeSnapshot(ProxyConfigSnapshot snapshot)
     {
         var http = snapshot.Http.Trim();
         var https = string.IsNullOrWhiteSpace(snapshot.Https) ? http : snapshot.Https.Trim();
         var noProxy = snapshot.NoProxy.Trim();
         return new ProxyConfigSnapshot(snapshot.Enabled, http, https, noProxy);
+    }
+
+    private static IReadOnlyList<CompositeTargetPlan> OrderCompositePlans(CompositeProxyPlan compositePlan)
+    {
+        return CompositeApplyOrder
+            .Select(target => compositePlan.Plans.FirstOrDefault(plan => string.Equals(plan.Target, target, StringComparison.Ordinal))
+                ?? throw new InvalidOperationException($"Composite plan is missing target '{target}'."))
+            .ToArray();
+    }
+
+    private CompositeTargetChange ApplyCompositeEnvironmentPlan(ProxyPlanPayload plan)
+    {
+        try
+        {
+            _environmentAdapter.ApplyEnvironmentProxy(plan.Desired);
+            var applied = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
+            VerifyEnvironmentSnapshot(plan.Desired, applied, "apply");
+            _configStore.WriteProxyConfig(applied);
+            return new CompositeTargetChange("env", "proxy-config-snapshot", plan.Before, applied);
+        }
+        catch
+        {
+            RevertEnvironment(plan.Before);
+            throw;
+        }
+    }
+
+    private CompositeTargetChange ApplyCompositeGitPlan(GitProxyPlan plan)
+    {
+        var adapter = GetGitAdapter();
+
+        try
+        {
+            adapter.Apply(plan);
+            var applied = adapter.Verify(plan.Desired);
+            return new CompositeTargetChange("git", "git-proxy-snapshot", plan.Before, applied);
+        }
+        catch
+        {
+            adapter.Rollback(plan.Before);
+            throw;
+        }
+    }
+
+    private void CompensateCompositeChanges(IReadOnlyList<CompositeTargetChange> appliedChanges)
+    {
+        for (var index = appliedChanges.Count - 1; index >= 0; index--)
+        {
+            var change = appliedChanges[index];
+            _ = change.Target switch
+            {
+                "env" => RollbackCompositeEnvironment(change),
+                "git" => RollbackCompositeGit(change),
+                _ => throw new InvalidOperationException($"Unsupported composite target: {change.Target}")
+            };
+        }
+    }
+
+    private CompositeTargetChange RollbackCompositeEnvironment(CompositeTargetChange change)
+    {
+        var beforeRollback = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
+        _environmentAdapter.ApplyEnvironmentProxy(change.ToProxyBeforeSnapshot());
+        var reverted = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
+        VerifyEnvironmentSnapshot(change.ToProxyBeforeSnapshot(), reverted, "rollback");
+        _configStore.WriteProxyConfig(reverted);
+        return new CompositeTargetChange("env", "proxy-config-snapshot", beforeRollback, reverted);
+    }
+
+    private CompositeTargetChange RollbackCompositeGit(CompositeTargetChange change)
+    {
+        var adapter = GetGitAdapter();
+        var beforeRollback = adapter.ReadCurrent();
+        var reverted = adapter.Rollback(change.ToGitBeforeSnapshot());
+        var verified = adapter.Verify(change.ToGitBeforeSnapshot());
+        return new CompositeTargetChange("git", "git-proxy-snapshot", beforeRollback, verified);
+    }
+
+    private void RevertEnvironment(ProxyConfigSnapshot snapshot)
+    {
+        _environmentAdapter.ApplyEnvironmentProxy(snapshot);
+        var reverted = NormalizeSnapshot(_environmentAdapter.ReadEnvironmentProxy());
+        _configStore.WriteProxyConfig(reverted);
+    }
+
+    private static void VerifyEnvironmentSnapshot(ProxyConfigSnapshot desired, ProxyConfigSnapshot actual, string operation)
+    {
+        if (NormalizeSnapshot(desired) != NormalizeSnapshot(actual))
+        {
+            throw new InvalidOperationException($"env proxy verification failed after {operation}");
+        }
     }
 }
