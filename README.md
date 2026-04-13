@@ -161,6 +161,7 @@ poshs <theme>
 - `setup --json`、`termforge status --json`、`termforge doctor json` 现在会对齐同一主命令名与环境事实来源
 - `proxy scan/plan/apply/rollback --json` 当前仍以 `env` 目标工作流为主
 - 首个应用级适配器是 standalone `git` 目标，当前范围只覆盖 `git config --global` 下的 `http.proxy`、`https.proxy` 和 `http.noProxy`
+- 当前 CLI 对 `git` 已开放 standalone `plan`；统一持久化链路下的 `git apply/rollback` 留在下一阶段
 - 当前阶段不支持组合式 `env + git` 编排
 - `proxy bypass add` 会把目标追加到 `proxy.noProxy`
 - 当 `proxy.enabled = true` 时，新增绕过项会立即同步到当前会话的 `no_proxy/NO_PROXY`

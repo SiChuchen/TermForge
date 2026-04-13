@@ -131,6 +131,22 @@ public class GitProxyAdapterTests
             seenCalls,
             args => args.SequenceEqual(new[] { "config", "--global", "http.proxy", "http://proxy host:7890" }));
     }
+
+    [Fact]
+    public void WindowsGitProxyAdapter_plan_enable_throws_when_git_is_unavailable()
+    {
+        var adapter = WindowsGitProxyAdapterTestHarness.CreateWindowsAdapter(
+            () => null,
+            (_, _) => throw new InvalidOperationException("should not run"));
+
+        Action act = () => adapter.PlanEnable(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:7890",
+            "127.0.0.1,localhost,::1");
+
+        var error = Assert.Throws<InvalidOperationException>(act);
+        Assert.Equal("git not available", error.Message);
+    }
 }
 
 internal sealed class FakeGitProxyAdapter : IGitProxyAdapter

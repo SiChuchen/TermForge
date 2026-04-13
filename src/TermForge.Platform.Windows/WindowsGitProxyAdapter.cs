@@ -48,6 +48,11 @@ public sealed class WindowsGitProxyAdapter : IGitProxyAdapter
     public GitProxyPlan PlanEnable(string httpProxy, string httpsProxy, string noProxy)
     {
         var before = ReadCurrent();
+        if (!before.Available)
+        {
+            throw new InvalidOperationException("git not available");
+        }
+
         var desired = new GitProxySnapshot(true, "global", httpProxy, httpsProxy, noProxy);
         return BuildPlan("enable", before, desired);
     }
@@ -55,6 +60,11 @@ public sealed class WindowsGitProxyAdapter : IGitProxyAdapter
     public GitProxyPlan PlanDisable()
     {
         var before = ReadCurrent();
+        if (!before.Available)
+        {
+            throw new InvalidOperationException("git not available");
+        }
+
         var desired = new GitProxySnapshot(before.Available, "global", string.Empty, string.Empty, string.Empty);
         return BuildPlan("disable", before, desired);
     }

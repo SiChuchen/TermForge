@@ -182,6 +182,7 @@ CMD 宿主不走 PowerShell profile 注入，而是通过：
 - `git` 是第一个 standalone adapter target
 - `git` 当前只覆盖 `git config --global` 的 `http.proxy`、`https.proxy` 和 `http.noProxy`
 - `git` 回滚模型是 snapshot-based：先读取变更前快照，再按快照重建目标键值
+- 当前 CLI 已开放 standalone `git plan`；统一 store 下的 `git apply/rollback` 将在下一阶段接通
 - 组合式 `env + git` 多目标编排仍然延后，不在当前 phase1 范围内
 - `npm/pip` 等其他应用级适配器仍留在后续阶段
 
