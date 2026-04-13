@@ -65,6 +65,106 @@ public class ProxyWorkflowServiceTests
 
         Assert.NotEqual(first.Payload.PlanId, second.Payload.PlanId);
     }
+
+    [Fact]
+    public void ProxyWorkflowService_can_plan_git_enable_operation()
+    {
+        var configStore = new FakeConfigStore();
+        var planStore = new FakePlanStore();
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter();
+        var clock = new FakeClock();
+        var gitAdapter = new FakeGitProxyAdapter(
+            new GitProxySnapshot(true, "global", "", "", ""));
+
+        var service = new TermForge.Core.Services.ProxyWorkflowService(
+            configStore,
+            planStore,
+            ledger,
+            environment,
+            clock,
+            gitAdapter);
+
+        var result = service.PlanGitEnable(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:7890",
+            "127.0.0.1,localhost,::1");
+
+        Assert.Equal("proxy.plan", result.Command);
+        Assert.Equal("git", result.Payload.Target);
+    }
+
+    [Fact]
+    public void ProxyWorkflowService_GitProxy_can_plan_git_disable_operation()
+    {
+        var configStore = new FakeConfigStore();
+        var planStore = new FakePlanStore();
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter();
+        var clock = new FakeClock();
+        var gitAdapter = new FakeGitProxyAdapter(
+            new GitProxySnapshot(
+                true,
+                "global",
+                "http://127.0.0.1:7890",
+                "http://127.0.0.1:7890",
+                "127.0.0.1,localhost,::1"));
+
+        var service = new TermForge.Core.Services.ProxyWorkflowService(
+            configStore,
+            planStore,
+            ledger,
+            environment,
+            clock,
+            gitAdapter);
+
+        var result = service.PlanGitDisable();
+
+        Assert.Equal("proxy.plan", result.Command);
+        Assert.Equal("git", result.Payload.Target);
+        Assert.Equal("disable", result.Payload.Mode);
+        Assert.Equal(3, result.Payload.Actions.Count);
+    }
+
+    [Fact]
+    public void ProxyWorkflowService_GitProxy_apply_and_rollback_use_adapter_state()
+    {
+        var configStore = new FakeConfigStore();
+        var planStore = new FakePlanStore();
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter();
+        var clock = new FakeClock();
+        var gitAdapter = new FakeGitProxyAdapter(
+            new GitProxySnapshot(
+                true,
+                "global",
+                "http://before:8080",
+                "http://before:8443",
+                "before.local"));
+
+        var service = new TermForge.Core.Services.ProxyWorkflowService(
+            configStore,
+            planStore,
+            ledger,
+            environment,
+            clock,
+            gitAdapter);
+
+        var plan = service.PlanGitEnable(
+            "http://target:7890",
+            "http://target:7891",
+            "127.0.0.1");
+
+        var apply = service.ApplyGit(plan.Payload);
+        var rollback = service.RollbackGit(plan.Payload.Before);
+
+        Assert.Equal("proxy.apply", apply.Command);
+        Assert.Equal("http://target:7890", apply.Payload.HttpProxy);
+        Assert.Equal("http://target:7891", apply.Payload.HttpsProxy);
+        Assert.Equal("proxy.rollback", rollback.Command);
+        Assert.Equal("http://before:8080", rollback.Payload.HttpProxy);
+        Assert.Equal("http://before:8443", rollback.Payload.HttpsProxy);
+    }
 }
 
 internal sealed class FakePlanStore : IPlanStore

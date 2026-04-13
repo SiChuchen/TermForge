@@ -8,6 +8,7 @@ public sealed class ProxyWorkflowService
 {
     private readonly IClock _clock;
     private readonly IConfigStore _configStore;
+    private readonly IGitProxyAdapter? _gitAdapter;
     private readonly IOperationLedger _ledger;
     private readonly IPlanStore _planStore;
     private readonly IPlatformEnvironmentAdapter _environmentAdapter;
@@ -17,13 +18,15 @@ public sealed class ProxyWorkflowService
         IPlanStore planStore,
         IOperationLedger ledger,
         IPlatformEnvironmentAdapter environmentAdapter,
-        IClock clock)
+        IClock clock,
+        IGitProxyAdapter? gitAdapter = null)
     {
         _configStore = configStore;
         _planStore = planStore;
         _ledger = ledger;
         _environmentAdapter = environmentAdapter;
         _clock = clock;
+        _gitAdapter = gitAdapter;
     }
 
     public CommandEnvelope<ProxyScanPayload> Scan()
@@ -66,6 +69,32 @@ public sealed class ProxyWorkflowService
         return Envelope("proxy.rollback", payload);
     }
 
+    public CommandEnvelope<GitProxyPlan> PlanGitEnable(string httpProxy, string httpsProxy, string noProxy)
+    {
+        var payload = GetGitAdapter().PlanEnable(httpProxy, httpsProxy, noProxy);
+        return Envelope("proxy.plan", payload);
+    }
+
+    public CommandEnvelope<GitProxyPlan> PlanGitDisable()
+    {
+        var payload = GetGitAdapter().PlanDisable();
+        return Envelope("proxy.plan", payload);
+    }
+
+    public CommandEnvelope<GitProxySnapshot> ApplyGit(GitProxyPlan plan)
+    {
+        var adapter = GetGitAdapter();
+        adapter.Apply(plan);
+        var payload = adapter.Verify(plan.Desired);
+        return Envelope("proxy.apply", payload);
+    }
+
+    public CommandEnvelope<GitProxySnapshot> RollbackGit(GitProxySnapshot before)
+    {
+        var payload = GetGitAdapter().Rollback(before);
+        return Envelope("proxy.rollback", payload);
+    }
+
     private CommandEnvelope<TPayload> Envelope<TPayload>(string command, TPayload payload)
     {
         return new CommandEnvelope<TPayload>(
@@ -80,6 +109,11 @@ public sealed class ProxyWorkflowService
     private string CreateId(string prefix)
     {
         return $"{prefix}-{_clock.NowText()}-{Guid.NewGuid():N}";
+    }
+
+    private IGitProxyAdapter GetGitAdapter()
+    {
+        return _gitAdapter ?? throw new InvalidOperationException("Git proxy adapter is not configured.");
     }
 
     private static ProxyConfigSnapshot NormalizeSnapshot(ProxyConfigSnapshot snapshot)
