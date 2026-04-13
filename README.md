@@ -21,7 +21,7 @@
 - 固定恢复入口 `wtctl`
 - `proxy` / `theme` 两个基础模块
 - `termforge doctor` 诊断输出与 `verify.ps1` smoke test
-- `.NET` 控制面 CLI，当前承接 `status --json`、`doctor --json`、env 目标 `proxy scan/plan/apply/rollback`，以及首个应用级适配器 `git` 的 standalone `proxy plan`
+- `.NET` 控制面 CLI，当前承接 `status --json`、`doctor --json`，以及 standalone `env` / `git` 目标 `proxy scan/plan/apply/rollback`
 - `setup --json`、`status --json`、`doctor json` 共享同一套环境事实来源，但各自保留独立的最终输出 schema
 - CMD + Clink + Oh My Posh 集成
 - Nerd Font 安装与 Windows Terminal / VS Code 字体写入
@@ -159,9 +159,9 @@ poshs <theme>
 - `termforge status --json` 现在通过 `.NET` 控制面输出机器可读状态
 - `termforge doctor json` 现在通过 `.NET` 控制面输出机器可读诊断结果
 - `setup --json`、`termforge status --json`、`termforge doctor json` 现在会对齐同一主命令名与环境事实来源
-- `proxy scan/plan/apply/rollback --json` 当前仍以 `env` 目标工作流为主
+- `proxy scan/plan/apply/rollback --json` 现在支持 standalone `env` 与 standalone `git` 工作流
 - 首个应用级适配器是 standalone `git` 目标，当前范围只覆盖 `git config --global` 下的 `http.proxy`、`https.proxy` 和 `http.noProxy`
-- 当前 CLI 对 `git` 已开放 standalone `plan`；统一持久化链路下的 `git apply/rollback` 留在下一阶段
+- `env` 与 `git` 现在共享同一条持久化的 plan/change 链路，由同一套 plan store 与 operation ledger 驱动
 - 当前阶段不支持组合式 `env + git` 编排
 - `proxy bypass add` 会把目标追加到 `proxy.noProxy`
 - 当 `proxy.enabled = true` 时，新增绕过项会立即同步到当前会话的 `no_proxy/NO_PROXY`

@@ -122,7 +122,7 @@ internal sealed class CommandDispatcher
         var current = _environmentAdapter.ReadEnvironmentProxy();
         var desired = new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty);
         var payload = new ProxyPlanPayload(CreateId("plan"), "env", "disable", current, desired);
-        _planStore.SavePlan(payload);
+        _planStore.SavePlanRecord(payload);
         return Envelope("proxy.plan", payload);
     }
 
