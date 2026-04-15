@@ -192,6 +192,12 @@ function Get-SccDefaultConfig {
             http    = ""
             https   = ""
             noProxy = "127.0.0.1,localhost,::1"
+            targets = [pscustomobject][ordered]@{
+                env = $true
+                git = $false
+                npm = $false
+                pip = $false
+            }
         }
         theme = [pscustomobject][ordered]@{
             enabled      = $true
@@ -826,6 +832,35 @@ function Get-SccSetupEnvironmentReport {
     }
 }
 
+function Get-SccStatusReport {
+    $config = Get-SccConfig
+    $rootPath = Get-SccRootPath
+    $primaryCommand = Get-SccPrimaryCommandName -Config $config
+    $state = Ensure-SccStateFile
+    $enabledModules = @(Get-SccEnabledModuleNames -State $state)
+
+    [pscustomobject][ordered]@{
+        RootPath           = $rootPath
+        PrimaryCommand     = $primaryCommand
+        EnabledModules     = @($enabledModules)
+        ConfigPath         = Get-SccConfigPath
+        ModuleStatePath    = Get-SccStatePath
+        RuntimeStatePath   = Join-Path $rootPath "state"
+        Proxy              = [pscustomobject][ordered]@{
+            Enabled = [bool]$config.proxy.enabled
+            Http    = $config.proxy.http
+            Https   = $config.proxy.https
+            NoProxy = $config.proxy.noProxy
+            Targets = [pscustomobject][ordered]@{
+                env = [bool]$(if ($config.proxy.targets) { $config.proxy.targets.env } else { $true })
+                git = [bool]$(if ($config.proxy.targets) { $config.proxy.targets.git } else { $false })
+                npm = [bool]$(if ($config.proxy.targets) { $config.proxy.targets.npm } else { $false })
+                pip = [bool]$(if ($config.proxy.targets) { $config.proxy.targets.pip } else { $false })
+            }
+        }
+    }
+}
+
 function Get-SccModuleScriptPaths {
     $modulesPath = Get-SccModulesPath
     if (-not (Test-Path $modulesPath)) {
@@ -1016,6 +1051,13 @@ function Get-SccDoctorResults {
             }
             if ($config.proxy.noProxy -isnot [string]) {
                 $configIssues += "proxy.noProxy 必须是字符串"
+            }
+            if ((Test-SccPropertyObject -Value $config.proxy.targets)) {
+                foreach ($targetName in @("env", "git", "npm", "pip")) {
+                    if ($config.proxy.targets.PSObject.Properties.Match($targetName).Count -gt 0 -and $config.proxy.targets.$targetName -isnot [bool]) {
+                        $configIssues += "proxy.targets.$targetName must be a boolean"
+                    }
+                }
             }
         }
 
