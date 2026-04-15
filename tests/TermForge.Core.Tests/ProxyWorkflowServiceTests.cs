@@ -162,8 +162,12 @@ public class ProxyWorkflowServiceTests
     [Fact]
     public void ProxyWorkflowService_plans_composite_env_git_enable_in_fixed_order()
     {
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: false, Pip: false)
+        };
         var service = new TermForge.Core.Services.ProxyWorkflowService(
-            new FakeConfigStore(),
+            configStore,
             new FakePlanStore(),
             new FakeOperationLedger(),
             new FakePlatformEnvironmentAdapter(
@@ -189,7 +193,10 @@ public class ProxyWorkflowServiceTests
     [Fact]
     public void ProxyWorkflowService_compensates_env_when_git_apply_fails_in_composite_apply()
     {
-        var configStore = new FakeConfigStore();
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: false, Pip: false)
+        };
         var planStore = new FakePlanStore();
         var ledger = new FakeOperationLedger();
         var environment = new FakePlatformEnvironmentAdapter(
@@ -221,7 +228,10 @@ public class ProxyWorkflowServiceTests
     [Fact]
     public void ProxyWorkflowService_verifies_env_cleanup_when_env_apply_verification_fails_in_composite_apply()
     {
-        var configStore = new FakeConfigStore();
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: false, Pip: false)
+        };
         var planStore = new FakePlanStore();
         var ledger = new FakeOperationLedger();
         var environment = new FakePlatformEnvironmentAdapter(
@@ -250,7 +260,10 @@ public class ProxyWorkflowServiceTests
     [Fact]
     public void ProxyWorkflowService_verifies_git_cleanup_when_git_apply_fails_in_composite_apply()
     {
-        var configStore = new FakeConfigStore();
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: false, Pip: false)
+        };
         var planStore = new FakePlanStore();
         var ledger = new FakeOperationLedger();
         var environment = new FakePlatformEnvironmentAdapter(
@@ -283,7 +296,10 @@ public class ProxyWorkflowServiceTests
     [Fact]
     public void ProxyWorkflowService_applies_composite_env_git_successfully()
     {
-        var configStore = new FakeConfigStore();
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: false, Pip: false)
+        };
         var planStore = new FakePlanStore();
         var ledger = new FakeOperationLedger();
         var environment = new FakePlatformEnvironmentAdapter(
@@ -322,7 +338,10 @@ public class ProxyWorkflowServiceTests
     [Fact]
     public void ProxyWorkflowService_rolls_back_composite_change_in_reverse_order()
     {
-        var configStore = new FakeConfigStore();
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: false, Pip: false)
+        };
         var planStore = new FakePlanStore();
         var ledger = new FakeOperationLedger();
         var environment = new FakePlatformEnvironmentAdapter(
@@ -365,7 +384,10 @@ public class ProxyWorkflowServiceTests
 
         try
         {
-            var configStore = new FakeConfigStore();
+            var configStore = new FakeConfigStore
+            {
+                TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: false, Pip: false)
+            };
             var environment = new FakePlatformEnvironmentAdapter(
                 new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
             var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""));
@@ -701,6 +723,209 @@ public class ProxyWorkflowServiceTests
             npmProxyAdapter: npmAdapter,
             pipProxyAdapter: pipAdapter);
     }
+
+    private static TermForge.Core.Services.ProxyWorkflowService CreateServiceWithAllAdapters(
+        FakeConfigStore? configStore = null,
+        FakePlanStore? planStore = null,
+        FakeOperationLedger? ledger = null,
+        FakePlatformEnvironmentAdapter? environment = null,
+        InjectableGitProxyAdapter? gitAdapter = null,
+        FakeTargetProxyAdapter? npmAdapter = null,
+        FakeTargetProxyAdapter? pipAdapter = null)
+    {
+        return new TermForge.Core.Services.ProxyWorkflowService(
+            configStore ?? new FakeConfigStore(),
+            planStore ?? new FakePlanStore(),
+            ledger ?? new FakeOperationLedger(),
+            environment ?? new FakePlatformEnvironmentAdapter(),
+            new FakeClock(),
+            gitAdapter,
+            npmAdapter,
+            pipAdapter);
+    }
+
+    [Fact]
+    public void PlanCompositeEnable_includes_npm_when_target_flag_on()
+    {
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: false, Npm: true, Pip: false)
+        };
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var service = CreateServiceWithAllAdapters(configStore: configStore, npmAdapter: npmAdapter);
+
+        var result = service.PlanCompositeEnable("http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var payload = result.Payload.GetPayload<CompositeProxyPlan>();
+
+        Assert.Contains(payload.Targets, t => t == "npm");
+        Assert.Contains(payload.Plans, p => p.Target == "npm");
+    }
+
+    [Fact]
+    public void PlanCompositeEnable_includes_pip_when_target_flag_on()
+    {
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: false, Npm: false, Pip: true)
+        };
+        var pipAdapter = new FakeTargetProxyAdapter("pip",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var service = CreateServiceWithAllAdapters(configStore: configStore, pipAdapter: pipAdapter);
+
+        var result = service.PlanCompositeEnable("http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var payload = result.Payload.GetPayload<CompositeProxyPlan>();
+
+        Assert.Contains(payload.Targets, t => t == "pip");
+        Assert.Contains(payload.Plans, p => p.Target == "pip");
+    }
+
+    [Fact]
+    public void PlanCompositeEnable_skips_npm_when_target_flag_off()
+    {
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: false, Pip: false)
+        };
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""));
+        var service = CreateServiceWithAllAdapters(configStore: configStore, gitAdapter: gitAdapter, npmAdapter: npmAdapter);
+
+        var result = service.PlanCompositeEnable("http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var payload = result.Payload.GetPayload<CompositeProxyPlan>();
+
+        Assert.DoesNotContain(payload.Targets, t => t == "npm");
+    }
+
+    [Fact]
+    public void PlanCompositeEnable_skips_npm_when_adapter_missing()
+    {
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: true, Pip: false)
+        };
+        // No npm adapter provided
+        var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""));
+        var service = CreateServiceWithAllAdapters(configStore: configStore, gitAdapter: gitAdapter);
+
+        var result = service.PlanCompositeEnable("http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var payload = result.Payload.GetPayload<CompositeProxyPlan>();
+
+        Assert.DoesNotContain(payload.Targets, t => t == "npm");
+    }
+
+    [Fact]
+    public void ApplyComposite_applies_env_git_npm_in_order()
+    {
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: true, Pip: false)
+        };
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter(
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""));
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var service = CreateServiceWithAllAdapters(
+            configStore: configStore, ledger: ledger, environment: environment,
+            gitAdapter: gitAdapter, npmAdapter: npmAdapter);
+
+        var plan = service.PlanCompositeEnable("http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var apply = service.Apply(plan.Payload.PlanId);
+        var payload = apply.Payload.GetAfter<CompositeProxyChange>();
+
+        Assert.Equal("composite", apply.Payload.Target);
+        Assert.True(environment.Current.Enabled);
+        Assert.Equal("http://127.0.0.1:7890", gitAdapter.Current.HttpProxy);
+        Assert.True(npmAdapter.Current.Enabled);
+        Assert.Equal("http://127.0.0.1:7890", npmAdapter.Current.Http);
+        Assert.Equal(1, ledger.Count);
+    }
+
+    [Fact]
+    public void ApplyComposite_compensates_on_npm_failure()
+    {
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: true, Pip: false)
+        };
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter(
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""));
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty))
+        {
+            ThrowOnApply = true
+        };
+        var service = CreateServiceWithAllAdapters(
+            configStore: configStore, ledger: ledger, environment: environment,
+            gitAdapter: gitAdapter, npmAdapter: npmAdapter);
+
+        var plan = service.PlanCompositeEnable("http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var error = Assert.Throws<InvalidOperationException>(() => service.Apply(plan.Payload.PlanId));
+
+        Assert.Contains("npm", error.Message);
+        Assert.False(environment.Current.Enabled);
+        Assert.Equal(string.Empty, gitAdapter.Current.HttpProxy);
+        Assert.Equal(0, ledger.Count);
+    }
+
+    [Fact]
+    public void RollbackComposite_rolls_back_all_targets()
+    {
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: true, Pip: false)
+        };
+        var ledger = new FakeOperationLedger();
+        var environment = new FakePlatformEnvironmentAdapter(
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""));
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var service = CreateServiceWithAllAdapters(
+            configStore: configStore, ledger: ledger, environment: environment,
+            gitAdapter: gitAdapter, npmAdapter: npmAdapter);
+
+        var plan = service.PlanCompositeEnable("http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var apply = service.Apply(plan.Payload.PlanId);
+        var rollback = service.Rollback(apply.Payload.ChangeId);
+        var payload = rollback.Payload.GetAfter<CompositeProxyChange>();
+
+        Assert.Equal("composite", rollback.Payload.Target);
+        Assert.False(environment.Current.Enabled);
+        Assert.Equal(string.Empty, gitAdapter.Current.HttpProxy);
+        Assert.False(npmAdapter.Current.Enabled);
+        Assert.Equal(2, ledger.Count);
+    }
+
+    [Fact]
+    public void PlanCompositeDisable_creates_disable_plan_for_all_targets()
+    {
+        var configStore = new FakeConfigStore
+        {
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: true, Pip: true)
+        };
+        var gitAdapter = new InjectableGitProxyAdapter(new GitProxySnapshot(true, "global", "", "", ""));
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(true, "http://npm:8080", "http://npm:8443", "npm.local"));
+        var pipAdapter = new FakeTargetProxyAdapter("pip",
+            new ProxyConfigSnapshot(true, "http://pip:8080", "http://pip:8443", "pip.local"));
+        var service = CreateServiceWithAllAdapters(
+            configStore: configStore, gitAdapter: gitAdapter, npmAdapter: npmAdapter, pipAdapter: pipAdapter);
+
+        var result = service.PlanCompositeDisable();
+        var payload = result.Payload.GetPayload<CompositeProxyPlan>();
+
+        Assert.Equal("disable", payload.Mode);
+        Assert.Contains("env", payload.Targets);
+        Assert.Contains("git", payload.Targets);
+        Assert.Contains("npm", payload.Targets);
+        Assert.Contains("pip", payload.Targets);
+    }
 }
 
 internal sealed class FakePlanStore : IPlanStore
@@ -886,8 +1111,9 @@ internal sealed class FakeTargetProxyAdapter : IProxyTargetAdapter
     public string TargetName { get; }
     public ProxyConfigSnapshot Current => _current;
     public bool ThrowOnApply { get; set; }
+    public bool Available { get; set; } = true;
 
-    public bool IsAvailable() => true;
+    public bool IsAvailable() => Available;
 
     public ProxyConfigSnapshot ReadCurrent() => _current;
 

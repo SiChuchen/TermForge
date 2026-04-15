@@ -306,7 +306,7 @@ public sealed class ProxyWorkflowService
             }
         }
 
-        var payload = new CompositeProxyChange(CompositeApplyOrder, compositePlan.Mode, appliedChanges, false, null);
+        var payload = new CompositeProxyChange(compositePlan.Targets, compositePlan.Mode, appliedChanges, false, null);
         var change = CreateCompositeChangeRecord(record.PlanId, payload);
         _ledger.AppendChangeRecord(change);
         return change;

@@ -120,6 +120,11 @@ internal sealed class CommandDispatcher
                 return workflow.PlanTargetEnable(targets.ToLowerInvariant(), http, https, noProxy);
             }
 
+            if (string.Equals(targets, "composite", StringComparison.OrdinalIgnoreCase))
+            {
+                return workflow.PlanCompositeEnable(http, https, noProxy);
+            }
+
             throw new InvalidOperationException("Phase1 only supports standalone --targets env or --targets git.");
         }
 
@@ -139,6 +144,11 @@ internal sealed class CommandDispatcher
                 string.Equals(targets, "pip", StringComparison.OrdinalIgnoreCase))
             {
                 return workflow.PlanTargetDisable(targets.ToLowerInvariant());
+            }
+
+            if (string.Equals(targets, "composite", StringComparison.OrdinalIgnoreCase))
+            {
+                return workflow.PlanCompositeDisable();
             }
 
             throw new InvalidOperationException("Phase1 only supports standalone --targets env or --targets git.");
