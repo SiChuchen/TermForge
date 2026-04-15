@@ -58,6 +58,19 @@ internal sealed class CommandDispatcher
             return CreateWorkflowService().Scan();
         }
 
+        if (args.Count >= 3 && Is(args[1], "scan"))
+        {
+            var scanOptions = ParseOptions(args, 2);
+            RequireJson(scanOptions);
+            var scanTargets = GetRequiredValue(scanOptions, "--targets");
+            var workflow = CreateWorkflowService();
+            if (string.Equals(scanTargets, "npm", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(scanTargets, "pip", StringComparison.OrdinalIgnoreCase))
+            {
+                return workflow.ScanTarget(scanTargets.ToLowerInvariant());
+            }
+        }
+
         var options = ParseOptions(args, 2);
         RequireJson(options);
 
@@ -101,6 +114,12 @@ internal sealed class CommandDispatcher
                 return workflow.PlanGitEnable(http, https, noProxy);
             }
 
+            if (string.Equals(targets, "npm", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(targets, "pip", StringComparison.OrdinalIgnoreCase))
+            {
+                return workflow.PlanTargetEnable(targets.ToLowerInvariant(), http, https, noProxy);
+            }
+
             throw new InvalidOperationException("Phase1 only supports standalone --targets env or --targets git.");
         }
 
@@ -116,6 +135,12 @@ internal sealed class CommandDispatcher
                 return workflow.PlanGitDisable();
             }
 
+            if (string.Equals(targets, "npm", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(targets, "pip", StringComparison.OrdinalIgnoreCase))
+            {
+                return workflow.PlanTargetDisable(targets.ToLowerInvariant());
+            }
+
             throw new InvalidOperationException("Phase1 only supports standalone --targets env or --targets git.");
         }
 
@@ -129,7 +154,7 @@ internal sealed class CommandDispatcher
 
     private ProxyWorkflowService CreateWorkflowService()
     {
-        return new ProxyWorkflowService(_configStore, _planStore, _operationLedger, _environmentAdapter, _clock, _gitProxyAdapter);
+        return new ProxyWorkflowService(_configStore, _planStore, _operationLedger, _environmentAdapter, _clock, _gitProxyAdapter, _npmAdapter, _pipAdapter);
     }
 
     private string? LoadSharedPrimaryCommandName()
