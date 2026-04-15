@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using TermForge.Contracts;
 using TermForge.Core.Interfaces;
+using TermForge.Platform;
 using Xunit;
 
 namespace TermForge.Core.Tests;
@@ -68,6 +70,47 @@ public class StatusServiceTests
         Assert.False(result.Payload.Proxy.Targets.Npm);
         Assert.False(result.Payload.Proxy.Targets.Pip);
     }
+
+    [Fact]
+    public void StatusService_includes_npm_target_state_when_adapter_provided()
+    {
+        var store = new FakeConfigStore { RootPath = @"E:\TF", ConfigPath = @"E:\TF\c.json", ModuleStatePath = @"E:\TF\m.json", RuntimeStatePath = @"E:\TF\s", PrimaryCommandName = "tfx" };
+        var npm = new FakeProxyTargetAdapter("npm", true, new ProxyConfigSnapshot(true, "http://proxy:8080", "http://proxy:8080", "localhost"));
+        var result = new TermForge.Core.Services.StatusService(store, npmAdapter: npm).BuildReport();
+        Assert.Single(result.Payload.Proxy.TargetStates);
+        Assert.Equal("npm", result.Payload.Proxy.TargetStates[0].Target);
+        Assert.True(result.Payload.Proxy.TargetStates[0].Available);
+        Assert.True(result.Payload.Proxy.TargetStates[0].Enabled);
+    }
+
+    [Fact]
+    public void StatusService_shows_npm_unavailable_when_not_installed()
+    {
+        var store = new FakeConfigStore { RootPath = @"E:\TF", ConfigPath = @"E:\TF\c.json", ModuleStatePath = @"E:\TF\m.json", RuntimeStatePath = @"E:\TF\s", PrimaryCommandName = "tfx" };
+        var npm = new FakeProxyTargetAdapter("npm", false, new ProxyConfigSnapshot(false, "", "", ""));
+        var result = new TermForge.Core.Services.StatusService(store, npmAdapter: npm).BuildReport();
+        Assert.Single(result.Payload.Proxy.TargetStates);
+        Assert.False(result.Payload.Proxy.TargetStates[0].Available);
+    }
+
+    [Fact]
+    public void StatusService_skips_npm_when_adapter_not_provided()
+    {
+        var store = new FakeConfigStore { RootPath = @"E:\TF", ConfigPath = @"E:\TF\c.json", ModuleStatePath = @"E:\TF\m.json", RuntimeStatePath = @"E:\TF\s", PrimaryCommandName = "tfx" };
+        var result = new TermForge.Core.Services.StatusService(store).BuildReport();
+        Assert.Empty(result.Payload.Proxy.TargetStates);
+    }
+
+    [Fact]
+    public void StatusService_includes_pip_target_state_when_adapter_provided()
+    {
+        var store = new FakeConfigStore { RootPath = @"E:\TF", ConfigPath = @"E:\TF\c.json", ModuleStatePath = @"E:\TF\m.json", RuntimeStatePath = @"E:\TF\s", PrimaryCommandName = "tfx" };
+        var pip = new FakeProxyTargetAdapter("pip", true, new ProxyConfigSnapshot(true, "http://proxy:3128", "http://proxy:3128", ""));
+        var result = new TermForge.Core.Services.StatusService(store, pipAdapter: pip).BuildReport();
+        Assert.Single(result.Payload.Proxy.TargetStates);
+        Assert.Equal("pip", result.Payload.Proxy.TargetStates[0].Target);
+        Assert.True(result.Payload.Proxy.TargetStates[0].Enabled);
+    }
 }
 
 internal sealed class FakeConfigStore : IConfigStore
@@ -92,4 +135,20 @@ internal sealed class FakeConfigStore : IConfigStore
     public string GetRuntimeStatePath() => RuntimeStatePath;
     public string GetPrimaryCommandName() => PrimaryCommandName;
     public IReadOnlyList<string> GetEnabledModules() => EnabledModules;
+}
+
+internal sealed class FakeProxyTargetAdapter : IProxyTargetAdapter
+{
+    private readonly string _targetName;
+    private readonly bool _isAvailable;
+    private readonly ProxyConfigSnapshot _current;
+    public FakeProxyTargetAdapter(string targetName, bool isAvailable, ProxyConfigSnapshot current) { _targetName = targetName; _isAvailable = isAvailable; _current = current; }
+    public string TargetName => _targetName;
+    public bool IsAvailable() => _isAvailable;
+    public ProxyConfigSnapshot ReadCurrent() => _current;
+    public ProxyConfigSnapshot PlanEnable(string http, string https, string noProxy) => throw new NotSupportedException();
+    public ProxyConfigSnapshot PlanDisable() => throw new NotSupportedException();
+    public ProxyConfigSnapshot Apply(ProxyConfigSnapshot desired) => throw new NotSupportedException();
+    public ProxyConfigSnapshot Verify(ProxyConfigSnapshot desired) => throw new NotSupportedException();
+    public ProxyConfigSnapshot Rollback(ProxyConfigSnapshot before) => throw new NotSupportedException();
 }

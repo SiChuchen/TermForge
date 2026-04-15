@@ -3,6 +3,7 @@ using System.Text.Json;
 using TermForge.Contracts;
 using TermForge.Core.Interfaces;
 using TermForge.Core.Services;
+using TermForge.Platform;
 using TermForge.Platform.Windows;
 
 namespace TermForge.Cli;
@@ -13,6 +14,8 @@ internal sealed class CommandDispatcher
     private readonly JsonConfigStore _configStore;
     private readonly WindowsEnvironmentAdapter _environmentAdapter;
     private readonly WindowsGitProxyAdapter _gitProxyAdapter;
+    private readonly IProxyTargetAdapter _npmAdapter;
+    private readonly IProxyTargetAdapter _pipAdapter;
     private readonly JsonOperationLedger _operationLedger;
     private readonly JsonPlanStore _planStore;
 
@@ -24,19 +27,21 @@ internal sealed class CommandDispatcher
         _operationLedger = new JsonOperationLedger(appPaths.OperationLedgerPath);
         _environmentAdapter = new WindowsEnvironmentAdapter();
         _gitProxyAdapter = new WindowsGitProxyAdapter();
+        _npmAdapter = new WindowsNpmProxyAdapter();
+        _pipAdapter = new WindowsPipProxyAdapter();
     }
 
     public object Dispatch(IReadOnlyList<string> args)
     {
         if (args.Count == 2 && Is(args[0], "status") && Is(args[1], "--json"))
         {
-            return new StatusService(_configStore, LoadSharedPrimaryCommandName()).BuildReport();
+            return new StatusService(_configStore, LoadSharedPrimaryCommandName(), _npmAdapter, _pipAdapter).BuildReport();
         }
 
 
         if (args.Count == 2 && Is(args[0], "doctor") && Is(args[1], "--json"))
         {
-            return new DoctorService(_configStore, LoadSharedPrimaryCommandName()).BuildReport();
+            return new DoctorService(_configStore, LoadSharedPrimaryCommandName(), _npmAdapter, _pipAdapter).BuildReport();
         }
         if (args.Count >= 2 && Is(args[0], "proxy"))
         {
