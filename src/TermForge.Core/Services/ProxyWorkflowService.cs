@@ -15,6 +15,7 @@ public sealed class ProxyWorkflowService
     private readonly IOperationLedger _ledger;
     private readonly IPlanStore _planStore;
     private readonly IPlatformEnvironmentAdapter _environmentAdapter;
+    private readonly Dictionary<string, IProxyTargetAdapter> _targetAdapters;
 
     public ProxyWorkflowService(
         IConfigStore configStore,
@@ -22,7 +23,9 @@ public sealed class ProxyWorkflowService
         IOperationLedger ledger,
         IPlatformEnvironmentAdapter environmentAdapter,
         IClock clock,
-        IGitProxyAdapter? gitAdapter = null)
+        IGitProxyAdapter? gitAdapter = null,
+        IProxyTargetAdapter? npmProxyAdapter = null,
+        IProxyTargetAdapter? pipProxyAdapter = null)
     {
         _configStore = configStore;
         _planStore = planStore;
@@ -30,6 +33,16 @@ public sealed class ProxyWorkflowService
         _environmentAdapter = environmentAdapter;
         _clock = clock;
         _gitAdapter = gitAdapter;
+        _targetAdapters = new Dictionary<string, IProxyTargetAdapter>(StringComparer.OrdinalIgnoreCase);
+        if (npmProxyAdapter is not null)
+        {
+            _targetAdapters["npm"] = npmProxyAdapter;
+        }
+
+        if (pipProxyAdapter is not null)
+        {
+            _targetAdapters["pip"] = pipProxyAdapter;
+        }
     }
 
     public CommandEnvelope<ProxyScanPayload> Scan()
@@ -110,6 +123,7 @@ public sealed class ProxyWorkflowService
             "env" => ApplyEnvironmentPlan(plan),
             "git" => ApplyGitPlan(plan),
             "composite" => ApplyCompositePlan(plan),
+            "npm" or "pip" => ApplyTargetPlan(plan),
             _ => throw new InvalidOperationException($"Unsupported plan target: {plan.Target}")
         };
 
@@ -124,6 +138,7 @@ public sealed class ProxyWorkflowService
             "env" => RollbackEnvironmentChange(change),
             "git" => RollbackGitChange(change),
             "composite" => RollbackCompositeChange(change),
+            "npm" or "pip" => RollbackTargetChange(change),
             _ => throw new InvalidOperationException($"Unsupported change target: {change.Target}")
         };
 
@@ -158,6 +173,36 @@ public sealed class ProxyWorkflowService
     {
         var payload = GetGitAdapter().Rollback(before);
         return Envelope("proxy.rollback", payload);
+    }
+
+    public CommandEnvelope<ProxyScanPayload> ScanTarget(string target)
+    {
+        var adapter = GetTargetAdapter(target);
+        var config = adapter.ReadCurrent();
+        var payload = new ProxyScanPayload(target, config);
+        return Envelope("proxy.scan", payload);
+    }
+
+    public CommandEnvelope<PlanRecord> PlanTargetEnable(string target, string httpProxy, string httpsProxy, string noProxy)
+    {
+        var adapter = GetTargetAdapter(target);
+        var before = adapter.ReadCurrent();
+        var desired = adapter.PlanEnable(httpProxy, httpsProxy, noProxy);
+        var planPayload = new TargetProxyPlanPayload(before, desired);
+        var record = CreatePlanRecord(CreateId("plan"), target, "target-proxy-plan", planPayload);
+        _planStore.SavePlanRecord(record);
+        return Envelope("proxy.plan", record);
+    }
+
+    public CommandEnvelope<PlanRecord> PlanTargetDisable(string target)
+    {
+        var adapter = GetTargetAdapter(target);
+        var before = adapter.ReadCurrent();
+        var desired = adapter.PlanDisable();
+        var planPayload = new TargetProxyPlanPayload(before, desired);
+        var record = CreatePlanRecord(CreateId("plan"), target, "target-proxy-plan", planPayload);
+        _planStore.SavePlanRecord(record);
+        return Envelope("proxy.plan", record);
     }
 
     private CommandEnvelope<TPayload> Envelope<TPayload>(string command, TPayload payload)
@@ -321,6 +366,51 @@ public sealed class ProxyWorkflowService
     private IGitProxyAdapter GetGitAdapter()
     {
         return _gitAdapter ?? throw new InvalidOperationException("Git proxy adapter is not configured.");
+    }
+
+    private IProxyTargetAdapter GetTargetAdapter(string target)
+    {
+        return _targetAdapters.TryGetValue(target, out var adapter)
+            ? adapter
+            : throw new InvalidOperationException($"Target adapter is not configured: {target}");
+    }
+
+    private ChangeRecord ApplyTargetPlan(PlanRecord record)
+    {
+        var adapter = GetTargetAdapter(record.Target);
+        var plan = record.GetPayload<TargetProxyPlanPayload>();
+        var applied = adapter.Apply(plan.Desired);
+        adapter.Verify(plan.Desired);
+
+        var change = CreateChangeRecord(
+            record.Target,
+            record.PlanId,
+            "target-proxy-apply",
+            plan.Before,
+            applied);
+
+        _ledger.AppendChangeRecord(change);
+        return change;
+    }
+
+    private ChangeRecord RollbackTargetChange(ChangeRecord change)
+    {
+        _ = _planStore.GetPlanRecord(change.PlanId) ?? throw new InvalidOperationException($"Plan not found: {change.PlanId}");
+        var adapter = GetTargetAdapter(change.Target);
+        var beforeRollback = adapter.ReadCurrent();
+        var before = change.GetBefore<ProxyConfigSnapshot>();
+        var reverted = adapter.Rollback(before);
+        adapter.Verify(before);
+
+        var rollback = CreateChangeRecord(
+            change.Target,
+            change.PlanId,
+            "target-proxy-rollback",
+            beforeRollback,
+            reverted);
+
+        _ledger.AppendChangeRecord(rollback);
+        return rollback;
     }
 
     private PlanRecord CreatePlanRecord(string planId, string target, string payloadType, object payload)

@@ -13,3 +13,7 @@ public sealed record ProxyTargetFlags(
 {
     public static ProxyTargetFlags Default { get; } = new(Env: true, Git: false, Npm: false, Pip: false);
 }
+
+public sealed record TargetProxyPlanPayload(
+    ProxyConfigSnapshot Before,
+    ProxyConfigSnapshot Desired);
