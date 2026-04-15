@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace TermForge.Contracts;
 
 public sealed record StatusPayload(
@@ -7,4 +9,12 @@ public sealed record StatusPayload(
     IReadOnlyList<string> EnabledModules,
     string ConfigPath,
     string ModuleStatePath,
-    string RuntimeStatePath);
+    string RuntimeStatePath,
+    StatusProxySummary Proxy);
+
+public sealed record StatusProxySummary(
+    bool Enabled,
+    string Http,
+    string Https,
+    string NoProxy,
+    ProxyTargetFlags Targets);

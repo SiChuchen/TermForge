@@ -17,6 +17,8 @@ public sealed class StatusService
 
     public CommandEnvelope<StatusPayload> BuildReport()
     {
+        var proxyConfig = _configStore.ReadProxyConfig();
+        var targetFlags = _configStore.GetProxyTargetFlags();
         var payload = new StatusPayload(
             RootPath: _configStore.GetRootPath(),
             PrimaryCommand: ResolvePrimaryCommandName(),
@@ -24,7 +26,13 @@ public sealed class StatusService
             EnabledModules: _configStore.GetEnabledModules(),
             ConfigPath: _configStore.GetConfigPath(),
             ModuleStatePath: _configStore.GetModuleStatePath(),
-            RuntimeStatePath: _configStore.GetRuntimeStatePath());
+            RuntimeStatePath: _configStore.GetRuntimeStatePath(),
+            Proxy: new StatusProxySummary(
+                proxyConfig.Enabled,
+                proxyConfig.Http,
+                proxyConfig.Https,
+                proxyConfig.NoProxy,
+                targetFlags));
 
         return new CommandEnvelope<StatusPayload>(
             Command: "status",

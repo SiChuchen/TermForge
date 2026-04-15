@@ -46,6 +46,28 @@ public class StatusServiceTests
 
         Assert.Equal("tfx", result.Payload.PrimaryCommand);
     }
+
+    [Fact]
+    public void StatusService_includes_proxy_target_flags_in_report()
+    {
+        var store = new FakeConfigStore
+        {
+            RootPath = @"E:\TermForge",
+            ConfigPath = @"E:\TermForge\scc.config.json",
+            ModuleStatePath = @"E:\TermForge\module_state.json",
+            RuntimeStatePath = @"E:\TermForge\state",
+            PrimaryCommandName = "termforge",
+            TargetFlags = new ProxyTargetFlags(Env: true, Git: true, Npm: false, Pip: false)
+        };
+
+        var service = new TermForge.Core.Services.StatusService(store);
+        var result = service.BuildReport();
+
+        Assert.True(result.Payload.Proxy.Targets.Env);
+        Assert.True(result.Payload.Proxy.Targets.Git);
+        Assert.False(result.Payload.Proxy.Targets.Npm);
+        Assert.False(result.Payload.Proxy.Targets.Pip);
+    }
 }
 
 internal sealed class FakeConfigStore : IConfigStore
