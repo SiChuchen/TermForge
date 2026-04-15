@@ -4,7 +4,7 @@ using TermForge.Platform;
 
 namespace TermForge.Platform.Windows;
 
-public sealed class WindowsGitProxyAdapter : IGitProxyAdapter
+public sealed class WindowsGitProxyAdapter : IGitProxyAdapter, IProxyTargetAdapter
 {
     private static readonly HashSet<string> ManagedKeys = new(StringComparer.Ordinal)
     {
@@ -107,6 +107,78 @@ public sealed class WindowsGitProxyAdapter : IGitProxyAdapter
         var plan = BuildPlan("rollback", ReadCurrent(), before);
         Apply(plan);
         return Verify(before);
+    }
+
+    private static ProxyConfigSnapshot MapToProxySnapshot(GitProxySnapshot git)
+    {
+        var enabled = !string.IsNullOrWhiteSpace(git.HttpProxy) || !string.IsNullOrWhiteSpace(git.HttpsProxy);
+        return new ProxyConfigSnapshot(enabled, git.HttpProxy, git.HttpsProxy, git.NoProxy);
+    }
+
+    private static GitProxySnapshot MapToGitSnapshot(ProxyConfigSnapshot proxy)
+    {
+        return new GitProxySnapshot(true, "global", proxy.Http, proxy.Https, proxy.NoProxy);
+    }
+
+    // --- IProxyTargetAdapter explicit implementation ---
+
+    string IProxyTargetAdapter.TargetName => "git";
+
+    bool IProxyTargetAdapter.IsAvailable()
+    {
+        return IsAvailable();
+    }
+
+    ProxyConfigSnapshot IProxyTargetAdapter.ReadCurrent()
+    {
+        var git = ReadCurrent();
+        return MapToProxySnapshot(git);
+    }
+
+    ProxyConfigSnapshot IProxyTargetAdapter.PlanEnable(string http, string https, string noProxy)
+    {
+        return new ProxyConfigSnapshot(true, http, https, noProxy);
+    }
+
+    ProxyConfigSnapshot IProxyTargetAdapter.PlanDisable()
+    {
+        return new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty);
+    }
+
+    ProxyConfigSnapshot IProxyTargetAdapter.Apply(ProxyConfigSnapshot desired)
+    {
+        var currentGit = ReadCurrent();
+        var desiredGit = MapToGitSnapshot(desired);
+        var plan = BuildPlan("enable", currentGit, desiredGit);
+
+        var git = _resolveGitExecutable() ?? throw new InvalidOperationException("git not available");
+        foreach (var action in plan.Actions)
+        {
+            if (action.Action == "set")
+            {
+                ExecuteGit(git, new[] { "config", "--global", action.Key, action.After });
+            }
+            else if (action.Action == "unset")
+            {
+                ExecuteGit(git, new[] { "config", "--global", "--unset", action.Key }, ignoreFailure: true);
+            }
+        }
+
+        return MapToProxySnapshot(Verify(desiredGit));
+    }
+
+    ProxyConfigSnapshot IProxyTargetAdapter.Verify(ProxyConfigSnapshot desired)
+    {
+        var desiredGit = MapToGitSnapshot(desired);
+        var result = Verify(desiredGit);
+        return MapToProxySnapshot(result);
+    }
+
+    ProxyConfigSnapshot IProxyTargetAdapter.Rollback(ProxyConfigSnapshot before)
+    {
+        var beforeGit = MapToGitSnapshot(before);
+        var result = Rollback(beforeGit);
+        return MapToProxySnapshot(result);
     }
 
     private static GitProxyPlan BuildPlan(string mode, GitProxySnapshot before, GitProxySnapshot desired)
