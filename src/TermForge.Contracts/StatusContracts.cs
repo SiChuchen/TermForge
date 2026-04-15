@@ -17,4 +17,13 @@ public sealed record StatusProxySummary(
     string Http,
     string Https,
     string NoProxy,
-    ProxyTargetFlags Targets);
+    ProxyTargetFlags Targets,
+    IReadOnlyList<StatusTargetState> TargetStates);
+
+public sealed record StatusTargetState(
+    string Target,
+    bool Available,
+    bool Enabled,
+    string Http,
+    string Https,
+    string NoProxy);
