@@ -504,6 +504,203 @@ public class ProxyWorkflowServiceTests
         Assert.Equal("http://before:8080", rollback.Payload.HttpProxy);
         Assert.Equal("http://before:8443", rollback.Payload.HttpsProxy);
     }
+
+    [Fact]
+    public void ScanTarget_returns_npm_current_state()
+    {
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(true, "http://npm:8080", "http://npm:8443", "npm.local"));
+        var service = CreateServiceWithAdapters(npmAdapter: npmAdapter);
+
+        var result = service.ScanTarget("npm");
+
+        Assert.Equal("proxy.scan", result.Command);
+        Assert.Equal("npm", result.Payload.Target);
+        Assert.Equal("http://npm:8080", result.Payload.Config.Http);
+        Assert.True(result.Payload.Config.Enabled);
+    }
+
+    [Fact]
+    public void ScanTarget_returns_pip_current_state()
+    {
+        var pipAdapter = new FakeTargetProxyAdapter("pip",
+            new ProxyConfigSnapshot(true, "http://pip:8080", "http://pip:8443", "pip.local"));
+        var service = CreateServiceWithAdapters(pipAdapter: pipAdapter);
+
+        var result = service.ScanTarget("pip");
+
+        Assert.Equal("proxy.scan", result.Command);
+        Assert.Equal("pip", result.Payload.Target);
+        Assert.Equal("http://pip:8080", result.Payload.Config.Http);
+        Assert.True(result.Payload.Config.Enabled);
+    }
+
+    [Fact]
+    public void PlanTargetEnable_saves_npm_plan_record()
+    {
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var planStore = new FakePlanStore();
+        var service = CreateServiceWithAdapters(planStore: planStore, npmAdapter: npmAdapter);
+
+        var result = service.PlanTargetEnable("npm", "http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+
+        Assert.Equal("proxy.plan", result.Command);
+        Assert.Equal("npm", result.Payload.Target);
+        Assert.Equal("target-proxy-plan", result.Payload.PayloadType);
+        var payload = result.Payload.GetPayload<TargetProxyPlanPayload>();
+        Assert.False(payload.Before.Enabled);
+        Assert.True(payload.Desired.Enabled);
+        Assert.Equal("http://127.0.0.1:7890", payload.Desired.Http);
+        Assert.NotNull(planStore.GetPlanRecord(result.Payload.PlanId));
+    }
+
+    [Fact]
+    public void PlanTargetEnable_saves_pip_plan_record()
+    {
+        var pipAdapter = new FakeTargetProxyAdapter("pip",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var planStore = new FakePlanStore();
+        var service = CreateServiceWithAdapters(planStore: planStore, pipAdapter: pipAdapter);
+
+        var result = service.PlanTargetEnable("pip", "http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+
+        Assert.Equal("proxy.plan", result.Command);
+        Assert.Equal("pip", result.Payload.Target);
+        Assert.Equal("target-proxy-plan", result.Payload.PayloadType);
+        var payload = result.Payload.GetPayload<TargetProxyPlanPayload>();
+        Assert.True(payload.Desired.Enabled);
+        Assert.Equal("http://127.0.0.1:7890", payload.Desired.Http);
+        Assert.NotNull(planStore.GetPlanRecord(result.Payload.PlanId));
+    }
+
+    [Fact]
+    public void PlanTargetDisable_saves_npm_disabled_plan()
+    {
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(true, "http://npm:8080", "http://npm:8443", "npm.local"));
+        var planStore = new FakePlanStore();
+        var service = CreateServiceWithAdapters(planStore: planStore, npmAdapter: npmAdapter);
+
+        var result = service.PlanTargetDisable("npm");
+
+        Assert.Equal("proxy.plan", result.Command);
+        Assert.Equal("npm", result.Payload.Target);
+        var payload = result.Payload.GetPayload<TargetProxyPlanPayload>();
+        Assert.True(payload.Before.Enabled);
+        Assert.False(payload.Desired.Enabled);
+        Assert.Equal(string.Empty, payload.Desired.Http);
+    }
+
+    [Fact]
+    public void Apply_reads_npm_plan_and_applies()
+    {
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var service = CreateServiceWithAdapters(npmAdapter: npmAdapter);
+
+        var plan = service.PlanTargetEnable("npm", "http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var apply = service.Apply(plan.Payload.PlanId);
+
+        Assert.Equal("proxy.apply", apply.Command);
+        Assert.Equal("npm", apply.Payload.Target);
+        Assert.Equal("target-proxy-apply", apply.Payload.PayloadType);
+        var after = apply.Payload.GetAfter<ProxyConfigSnapshot>();
+        Assert.True(after.Enabled);
+        Assert.Equal("http://127.0.0.1:7890", after.Http);
+    }
+
+    [Fact]
+    public void Apply_reads_pip_plan_and_applies()
+    {
+        var pipAdapter = new FakeTargetProxyAdapter("pip",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var service = CreateServiceWithAdapters(pipAdapter: pipAdapter);
+
+        var plan = service.PlanTargetEnable("pip", "http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var apply = service.Apply(plan.Payload.PlanId);
+
+        Assert.Equal("proxy.apply", apply.Command);
+        Assert.Equal("pip", apply.Payload.Target);
+        var after = apply.Payload.GetAfter<ProxyConfigSnapshot>();
+        Assert.True(after.Enabled);
+        Assert.Equal("http://127.0.0.1:7890", after.Http);
+    }
+
+    [Fact]
+    public void Rollback_npm_restores_before_state()
+    {
+        var npmAdapter = new FakeTargetProxyAdapter("npm",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var service = CreateServiceWithAdapters(npmAdapter: npmAdapter);
+
+        var plan = service.PlanTargetEnable("npm", "http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var apply = service.Apply(plan.Payload.PlanId);
+        var rollback = service.Rollback(apply.Payload.ChangeId);
+
+        Assert.Equal("proxy.rollback", rollback.Command);
+        Assert.Equal("npm", rollback.Payload.Target);
+        Assert.Equal("target-proxy-rollback", rollback.Payload.PayloadType);
+        var after = rollback.Payload.GetAfter<ProxyConfigSnapshot>();
+        Assert.False(after.Enabled);
+        Assert.Equal(string.Empty, after.Http);
+    }
+
+    [Fact]
+    public void Rollback_pip_restores_before_state()
+    {
+        var pipAdapter = new FakeTargetProxyAdapter("pip",
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty));
+        var service = CreateServiceWithAdapters(pipAdapter: pipAdapter);
+
+        var plan = service.PlanTargetEnable("pip", "http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+        var apply = service.Apply(plan.Payload.PlanId);
+        var rollback = service.Rollback(apply.Payload.ChangeId);
+
+        Assert.Equal("proxy.rollback", rollback.Command);
+        Assert.Equal("pip", rollback.Payload.Target);
+        var after = rollback.Payload.GetAfter<ProxyConfigSnapshot>();
+        Assert.False(after.Enabled);
+        Assert.Equal(string.Empty, after.Http);
+    }
+
+    [Fact]
+    public void Apply_throws_for_npm_plan_when_adapter_missing()
+    {
+        var service = CreateServiceWithAdapters();
+        var plan = service.PlanEnable("http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1");
+
+        // PlanEnable creates an env plan. We manually construct an npm plan to test missing adapter.
+        var fakePlanStore = new FakePlanStore();
+        var clock = new FakeClock();
+        var planPayload = new TargetProxyPlanPayload(
+            new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty),
+            new ProxyConfigSnapshot(true, "http://127.0.0.1:7890", "http://127.0.0.1:7890", "127.0.0.1"));
+        var record = new PlanRecord("plan-missing-npm", "npm", "2026-04-13", clock.NowText(), "target-proxy-plan", planPayload);
+        fakePlanStore.SavePlanRecord(record);
+
+        var serviceWithoutAdapter = new TermForge.Core.Services.ProxyWorkflowService(
+            new FakeConfigStore(), fakePlanStore, new FakeOperationLedger(),
+            new FakePlatformEnvironmentAdapter(), clock);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => serviceWithoutAdapter.Apply("plan-missing-npm"));
+        Assert.Contains("npm", ex.Message);
+    }
+
+    private static TermForge.Core.Services.ProxyWorkflowService CreateServiceWithAdapters(
+        FakePlanStore? planStore = null,
+        FakeTargetProxyAdapter? npmAdapter = null,
+        FakeTargetProxyAdapter? pipAdapter = null)
+    {
+        return new TermForge.Core.Services.ProxyWorkflowService(
+            new FakeConfigStore(),
+            planStore ?? new FakePlanStore(),
+            new FakeOperationLedger(),
+            new FakePlatformEnvironmentAdapter(),
+            new FakeClock(),
+            npmProxyAdapter: npmAdapter,
+            pipProxyAdapter: pipAdapter);
+    }
 }
 
 internal sealed class FakePlanStore : IPlanStore
@@ -673,5 +870,61 @@ internal sealed class InjectableGitProxyAdapter : IGitProxyAdapter
 
         var action = string.IsNullOrWhiteSpace(after) ? "unset" : "set";
         actions.Add(new GitProxyPlanAction(key, action, before, after));
+    }
+}
+
+internal sealed class FakeTargetProxyAdapter : IProxyTargetAdapter
+{
+    private ProxyConfigSnapshot _current;
+
+    public FakeTargetProxyAdapter(string targetName, ProxyConfigSnapshot current)
+    {
+        TargetName = targetName;
+        _current = current;
+    }
+
+    public string TargetName { get; }
+    public ProxyConfigSnapshot Current => _current;
+    public bool ThrowOnApply { get; set; }
+
+    public bool IsAvailable() => true;
+
+    public ProxyConfigSnapshot ReadCurrent() => _current;
+
+    public ProxyConfigSnapshot PlanEnable(string http, string https, string noProxy)
+    {
+        return new ProxyConfigSnapshot(true, http, https, noProxy);
+    }
+
+    public ProxyConfigSnapshot PlanDisable()
+    {
+        return new ProxyConfigSnapshot(false, string.Empty, string.Empty, string.Empty);
+    }
+
+    public ProxyConfigSnapshot Apply(ProxyConfigSnapshot desired)
+    {
+        if (ThrowOnApply)
+        {
+            throw new InvalidOperationException($"{TargetName} apply failed");
+        }
+
+        _current = desired;
+        return _current;
+    }
+
+    public ProxyConfigSnapshot Verify(ProxyConfigSnapshot desired)
+    {
+        if (_current != desired)
+        {
+            throw new InvalidOperationException($"{TargetName} proxy verification failed");
+        }
+
+        return _current;
+    }
+
+    public ProxyConfigSnapshot Rollback(ProxyConfigSnapshot before)
+    {
+        _current = before;
+        return before;
     }
 }
