@@ -58,9 +58,12 @@ internal sealed class FakeConfigStore : IConfigStore
     public string RuntimeStatePath { get; set; } = "state";
     public string PrimaryCommandName { get; set; } = "termforge";
     public IReadOnlyList<string> EnabledModules { get; set; } = new List<string> { "proxy" };
+    public ProxyTargetFlags TargetFlags { get; set; } = ProxyTargetFlags.Default;
 
     public ProxyConfigSnapshot ReadProxyConfig() => _snapshot;
     public void WriteProxyConfig(ProxyConfigSnapshot snapshot) => _snapshot = snapshot;
+    public ProxyTargetFlags GetProxyTargetFlags() => TargetFlags;
+    public void WriteProxyTargetFlags(ProxyTargetFlags flags) => TargetFlags = flags;
     public string GetRootPath() => RootPath;
     public string GetConfigPath() => ConfigPath;
     public string GetModuleStatePath() => ModuleStatePath;

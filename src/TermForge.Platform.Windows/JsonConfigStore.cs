@@ -42,6 +42,43 @@ public sealed class JsonConfigStore : IConfigStore
         WriteJsonObject(_configPath, root);
     }
 
+    public ProxyTargetFlags GetProxyTargetFlags()
+    {
+        var root = ReadJsonObject(_configPath);
+        var proxy = root["proxy"] as JsonObject;
+        var targets = proxy?["targets"] as JsonObject;
+        if (targets is null)
+        {
+            return ProxyTargetFlags.Default;
+        }
+
+        return new ProxyTargetFlags(
+            Env: targets["env"]?.GetValue<bool>() ?? true,
+            Git: targets["git"]?.GetValue<bool>() ?? false,
+            Npm: targets["npm"]?.GetValue<bool>() ?? false,
+            Pip: targets["pip"]?.GetValue<bool>() ?? false);
+    }
+
+    public void WriteProxyTargetFlags(ProxyTargetFlags flags)
+    {
+        var root = ReadJsonObject(_configPath);
+        var proxy = root["proxy"] as JsonObject;
+        if (proxy is null)
+        {
+            proxy = new JsonObject();
+            root["proxy"] = proxy;
+        }
+
+        proxy["targets"] = new JsonObject
+        {
+            ["env"] = flags.Env,
+            ["git"] = flags.Git,
+            ["npm"] = flags.Npm,
+            ["pip"] = flags.Pip
+        };
+        WriteJsonObject(_configPath, root);
+    }
+
     public string GetRootPath()
     {
         return _rootPath;
