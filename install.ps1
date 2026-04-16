@@ -54,6 +54,165 @@ function Write-SccInstallSection {
     }
 }
 
+$script:InstallStepCount = 6
+$script:CurrentStep = 0
+
+function Write-SccInstallOverallProgress {
+    param(
+        [Parameter(Mandatory)][string]$StepTitle,
+        [int]$StepNumber = 0
+    )
+
+    if ($StepNumber -gt 0) {
+        $script:CurrentStep = $StepNumber
+    }
+    $percent = [Math]::Floor(($script:CurrentStep / $script:InstallStepCount) * 100)
+    Write-Progress -Activity "TermForge Install" -Status "Step $($script:CurrentStep)/$($script:InstallStepCount): $StepTitle" -PercentComplete $percent -Id 0
+}
+
+function Write-SccInstallSubProgress {
+    param(
+        [string]$Activity = "Working",
+        [string]$Status = "",
+        [int]$PercentComplete = -1
+    )
+
+    Write-Progress -Activity $Activity -Status $Status -PercentComplete $PercentComplete -Id 1 -ParentId 0
+}
+
+function Complete-SccInstallSubProgress {
+    param([string]$Activity = "Done")
+
+    Write-Progress -Activity $Activity -Status "Complete" -PercentComplete 100 -Id 1 -ParentId 0 -Completed
+}
+
+function Invoke-SccWebRequest {
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][string]$OutFile,
+        [string]$Activity = "Downloading",
+        [string]$Proxy = "",
+        [int]$RetryCount = 2,
+        [int]$RetryDelaySeconds = 3
+    )
+
+    $previousProtocol = [Net.ServicePointManager]::SecurityProtocol
+    $previousProgress = $ProgressPreference
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $ProgressPreference = 'SilentlyContinue'
+
+        $outDir = Split-Path -Parent $OutFile
+        if (-not [string]::IsNullOrWhiteSpace($outDir) -and -not (Test-Path $outDir)) {
+            New-Item -Path $outDir -ItemType Directory -Force | Out-Null
+        }
+
+        for ($attempt = 0; $attempt -le $RetryCount; $attempt++) {
+            try {
+                $useProxy = -not [string]::IsNullOrWhiteSpace($Proxy)
+                $proxyLabel = if ($useProxy) { " (via proxy)" } else { "" }
+
+                Write-SccInstallSubProgress -Activity $Activity -Status "Downloading$proxyLabel (attempt $($attempt + 1)/$($RetryCount + 1))..." -PercentComplete -1
+
+                $params = @{
+                    Uri             = $Uri
+                    OutFile         = $OutFile
+                    UseBasicParsing = $true
+                    TimeoutSec      = 300
+                }
+                if ($useProxy) {
+                    $params.Proxy = $Proxy
+                    $params.ProxyUseDefaultCredentials = $true
+                }
+                Invoke-WebRequest @params
+
+                Write-SccInstallStep "Downloaded: $(Split-Path -Leaf $OutFile)"
+                return
+            } catch {
+                $lastError = $_
+                if ($attempt -lt $RetryCount) {
+                    Write-SccInstallWarn "Download failed (attempt $($attempt + 1)/$($RetryCount + 1)), retrying in ${RetryDelaySeconds}s..."
+                    Start-Sleep -Seconds $RetryDelaySeconds
+                    continue
+                }
+
+                if (-not $useProxy) {
+                    $systemProxy = $env:HTTP_PROXY
+                    if ([string]::IsNullOrWhiteSpace($systemProxy)) {
+                        $systemProxy = $env:http_proxy
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($systemProxy)) {
+                        Write-SccInstallWarn "Direct download failed. Retrying with system proxy: $systemProxy"
+                        try {
+                            Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -TimeoutSec 300 -Proxy $systemProxy -ProxyUseDefaultCredentials
+                            Write-SccInstallStep "Downloaded via proxy: $(Split-Path -Leaf $OutFile)"
+                            return
+                        } catch {
+                            $lastError = $_
+                        }
+                    }
+                }
+
+                throw "Download failed after $($RetryCount + 1) attempts: $($lastError.Exception.Message)"
+            }
+        }
+    } finally {
+        [Net.ServicePointManager]::SecurityProtocol = $previousProtocol
+        $ProgressPreference = $previousProgress
+    }
+}
+
+function Install-SccWinget {
+    param(
+        [string]$HttpProxy = "",
+        [string]$HttpsProxy = ""
+    )
+
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        return $true
+    }
+
+    Write-SccInstallStep "winget not found, attempting auto-install..."
+    $effectiveProxy = if (-not [string]::IsNullOrWhiteSpace($HttpsProxy)) { $HttpsProxy } else { $HttpProxy }
+
+    $tempDir = Join-Path $env:TEMP "TermForge-winget-$(Get-Random)"
+    try {
+        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+
+        $vcLibsPath = Join-Path $tempDir "VCLibs-x64.appx"
+        Invoke-SccWebRequest -Uri "https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx" `
+            -OutFile $vcLibsPath -Activity "Installing winget - VCLibs" -Proxy $effectiveProxy
+
+        Write-SccInstallSubProgress -Activity "Installing winget" -Status "Installing VCLibs..." -PercentComplete 40
+        Add-AppxPackage -Path $vcLibsPath
+
+        $wingetPath = Join-Path $tempDir "DesktopAppInstaller.msixbundle"
+        Invoke-SccWebRequest -Uri "https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle" `
+            -OutFile $wingetPath -Activity "Installing winget - DesktopAppInstaller" -Proxy $effectiveProxy
+
+        Write-SccInstallSubProgress -Activity "Installing winget" -Status "Installing DesktopAppInstaller..." -PercentComplete 80
+        Add-AppxPackage -Path $wingetPath
+
+        Complete-SccInstallSubProgress -Activity "Installing winget"
+
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-SccInstallStep "winget installed successfully."
+            return $true
+        }
+
+        Write-SccInstallWarn "winget installation completed but not yet in PATH. A terminal restart may be needed."
+        return $false
+    } catch {
+        Write-SccInstallWarn "winget auto-install failed: $($_.Exception.Message)"
+        Complete-SccInstallSubProgress -Activity "Installing winget"
+        return $false
+    } finally {
+        if (Test-Path $tempDir) {
+            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Read-SccInstallText {
     param(
         [Parameter(Mandatory)][string]$Prompt,
@@ -176,7 +335,9 @@ function Ensure-SccDependency {
     param(
         [Parameter(Mandatory)][string]$CommandName,
         [Parameter(Mandatory)][string]$WingetId,
-        [Parameter(Mandatory)][string]$FriendlyName
+        [Parameter(Mandatory)][string]$FriendlyName,
+        [string]$HttpProxy = "",
+        [string]$HttpsProxy = ""
     )
 
     if (Get-SccCommandSource -CommandName $CommandName) {
@@ -190,12 +351,23 @@ function Ensure-SccDependency {
     }
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-SccInstallWarn "未检测到 winget，无法自动安装 $FriendlyName。"
-        return $false
+        $installWinget = Read-SccInstallBool -Prompt "winget 未检测到。是否自动下载安装 winget" -Default $true
+        if ($installWinget) {
+            $wingetInstalled = Install-SccWinget -HttpProxy $HttpProxy -HttpsProxy $HttpsProxy
+            if (-not $wingetInstalled) {
+                Write-SccInstallWarn "winget 安装失败，无法自动安装 $FriendlyName。"
+                return $false
+            }
+        } else {
+            Write-SccInstallWarn "未检测到 winget，且你选择不自动安装，无法安装 $FriendlyName。"
+            return $false
+        }
     }
 
     Write-SccInstallStep "正在通过 winget 安装 $FriendlyName ..."
+    Write-SccInstallSubProgress -Activity "Installing $FriendlyName" -Status "winget install $WingetId ..." -PercentComplete -1
     & winget install --id $WingetId --exact --source winget --accept-source-agreements --accept-package-agreements
+    Complete-SccInstallSubProgress -Activity "Installing $FriendlyName"
 
     if (Get-SccCommandSource -CommandName $CommandName) {
         Write-SccInstallStep "$FriendlyName 安装完成。"
@@ -211,10 +383,12 @@ function Ensure-SccRequiredDependency {
         [Parameter(Mandatory)][string]$CommandName,
         [Parameter(Mandatory)][string]$WingetId,
         [Parameter(Mandatory)][string]$FriendlyName,
-        [string]$Reason = ""
+        [string]$Reason = "",
+        [string]$HttpProxy = "",
+        [string]$HttpsProxy = ""
     )
 
-    if (Ensure-SccDependency -CommandName $CommandName -WingetId $WingetId -FriendlyName $FriendlyName) {
+    if (Ensure-SccDependency -CommandName $CommandName -WingetId $WingetId -FriendlyName $FriendlyName -HttpProxy $HttpProxy -HttpsProxy $HttpsProxy) {
         return
     }
 
@@ -549,7 +723,9 @@ function Configure-SccCmdHost {
     param(
         [Parameter(Mandatory)][bool]$EnableCmdHost,
         [Parameter(Mandatory)][string]$InstallRoot,
-        [Parameter(Mandatory)][string]$ThemePath
+        [Parameter(Mandatory)][string]$ThemePath,
+        [string]$HttpProxy = "",
+        [string]$HttpsProxy = ""
     )
 
     if (-not $EnableCmdHost) {
@@ -562,7 +738,7 @@ function Configure-SccCmdHost {
 
     $clinkExecutable = Find-SccClinkExecutable
     if ([string]::IsNullOrWhiteSpace($clinkExecutable)) {
-        [void](Ensure-SccDependency -CommandName "clink" -WingetId "chrisant996.Clink" -FriendlyName "Clink")
+        [void](Ensure-SccDependency -CommandName "clink" -WingetId "chrisant996.Clink" -FriendlyName "Clink" -HttpProxy $HttpProxy -HttpsProxy $HttpsProxy)
         $clinkExecutable = Find-SccClinkExecutable
     }
 
@@ -732,7 +908,7 @@ function Read-SccInstallHostPlan {
 }
 
 function Read-SccInstallProxyConfig {
-    Write-SccInstallSection -Title "Step 4/6 - 代理设置" -Notes @(
+    Write-SccInstallSection -Title "Step 3/6 - 代理设置" -Notes @(
         "代理默认关闭。只有在你确实需要通过公司代理或本地代理访问网络时才启用。",
         "HTTP/HTTPS 示例: http://127.0.0.1:7890",
         "NO_PROXY 默认保留 127.0.0.1,localhost,::1，避免本地回环流量走代理。"
@@ -778,18 +954,28 @@ Write-Host "默认主命令是 termforge；你可以在安装过程中改成别�
 Write-Host "固定恢复入口始终是 wtctl；代理默认关闭，需要时再按向导填写。" -ForegroundColor DarkGray
 Write-Host ""
 
+Write-SccInstallOverallProgress -StepTitle "基本设置" -StepNumber 1
 Write-SccInstallSection -Title "Step 1/6 - 基本设置"
 $installRoot = [System.IO.Path]::GetFullPath((Read-SccInstallText -Prompt "安装目录" -Default $installRoot))
 $commandName = Read-SccInstallCommandName -Default "termforge"
 $addToPath = Read-SccInstallBool -Prompt "是否将安装目录加入用户 PATH（便于从 cmd / PowerShell 直接执行命令）" -Default $true
 
+Write-SccInstallOverallProgress -StepTitle "宿主选择" -StepNumber 2
 $hostPlan = Read-SccInstallHostPlan
 $managePowerShellProfile = [bool]$hostPlan.ManagePowerShellProfile
 $manageVsCodeProfile = [bool]$hostPlan.ManageVsCodeProfile
 $enableCmdHost = [bool]$hostPlan.EnableCmdHost
 $useWindowsTerminal = [bool]$hostPlan.UseWindowsTerminal
 
-Write-SccInstallSection -Title "Step 3/6 - 依赖与主题" -Notes @(
+Write-SccInstallOverallProgress -StepTitle "代理设置" -StepNumber 3
+$proxyConfig = Read-SccInstallProxyConfig
+$configureProxy = [bool]$proxyConfig.Enabled
+$httpProxy = $proxyConfig.Http
+$httpsProxy = $proxyConfig.Https
+$noProxy = $proxyConfig.NoProxy
+
+Write-SccInstallOverallProgress -StepTitle "依赖与主题" -StepNumber 4
+Write-SccInstallSection -Title "Step 4/6 - 依赖与主题" -Notes @(
     "Oh My Posh 是 TermForge 的必需依赖，缺失时会尝试自动安装。",
     "Windows Terminal 只会在你选择要用它时才会参与安装/配置。"
 )
@@ -811,12 +997,12 @@ if ($managePowerShellProfile -or $manageVsCodeProfile) {
 }
 
 if ($shouldInstallPowerShell) {
-    [void](Ensure-SccDependency -CommandName "pwsh" -WingetId "Microsoft.PowerShell" -FriendlyName "PowerShell 7")
+    [void](Ensure-SccDependency -CommandName "pwsh" -WingetId "Microsoft.PowerShell" -FriendlyName "PowerShell 7" -HttpProxy $httpProxy -HttpsProxy $httpsProxy)
 } elseif ($managePowerShellProfile -or $manageVsCodeProfile) {
     Write-SccInstallWarn "你未选择自动安装 PowerShell 7；如果目标环境没有 pwsh，运行时会跳过部分 smoke test。"
 }
 
-Ensure-SccRequiredDependency -CommandName "oh-my-posh" -WingetId "JanDeDobbeleer.OhMyPosh" -FriendlyName "Oh My Posh" -Reason "主题初始化、PowerShell 提示符和 CMD/Clink 集成都依赖它。"
+Ensure-SccRequiredDependency -CommandName "oh-my-posh" -WingetId "JanDeDobbeleer.OhMyPosh" -FriendlyName "Oh My Posh" -Reason "主题初始化、PowerShell 提示符和 CMD/Clink 集成都依赖它。" -HttpProxy $httpProxy -HttpsProxy $httpsProxy
 
 if ($useWindowsTerminal) {
     $shouldInstallWindowsTerminal = Read-SccInstallBool -Prompt "若缺少 Windows Terminal，是否自动安装" -Default $true
@@ -825,7 +1011,7 @@ if ($useWindowsTerminal) {
 }
 
 if ($shouldInstallWindowsTerminal) {
-    [void](Ensure-SccDependency -CommandName "wt" -WingetId "Microsoft.WindowsTerminal" -FriendlyName "Windows Terminal")
+    [void](Ensure-SccDependency -CommandName "wt" -WingetId "Microsoft.WindowsTerminal" -FriendlyName "Windows Terminal" -HttpProxy $httpProxy -HttpsProxy $httpsProxy)
 } elseif ($useWindowsTerminal) {
     Write-SccInstallWarn "你选择了 Windows Terminal 场景，但未启用自动安装；如果本机没有 Windows Terminal，相关字体配置会失败。"
 }
@@ -834,19 +1020,14 @@ if ($configureFonts) {
     Write-SccInstallWarn "若字体安装完成但当前终端未立即生效，通常只需要重开宿主终端。"
 }
 
-$proxyConfig = Read-SccInstallProxyConfig
-$configureProxy = [bool]$proxyConfig.Enabled
-$httpProxy = $proxyConfig.Http
-$httpsProxy = $proxyConfig.Https
-$noProxy = $proxyConfig.NoProxy
-
+Write-SccInstallOverallProgress -StepTitle "部署运行时" -StepNumber 5
 Write-SccInstallSection -Title "Step 5/6 - 部署运行时"
 Write-SccInstallStep "正在部署运行时文件 ..."
 if (-not (Test-Path $installRoot)) {
     New-Item -Path $installRoot -ItemType Directory -Force | Out-Null
 }
 
-foreach ($relativePath in @(
+$runtimeFiles = @(
     "setup.ps1",
     "bootstrap.ps1",
     "launcher.ps1",
@@ -860,11 +1041,18 @@ foreach ($relativePath in @(
     "install.ps1",
     "install.cmd",
     "uninstall.ps1"
-)) {
+)
+$totalFiles = $runtimeFiles.Count + 2
+$fileIndex = 0
+foreach ($relativePath in $runtimeFiles) {
+    $fileIndex++
+    Write-SccInstallSubProgress -Activity "Deploying runtime" -Status "Copying $relativePath" -PercentComplete ([Math]::Floor(($fileIndex / $totalFiles) * 100))
     Copy-SccRuntimeFile -SourceRoot $sourceRoot -InstallRoot $installRoot -RelativePath $relativePath
 }
 
 foreach ($directoryName in @("modules", "themes")) {
+    $fileIndex++
+    Write-SccInstallSubProgress -Activity "Deploying runtime" -Status "Copying $directoryName/" -PercentComplete ([Math]::Floor(($fileIndex / $totalFiles) * 100))
     $sourceDirectory = Join-Path $sourceRoot $directoryName
     $targetDirectory = Join-Path $installRoot $directoryName
     if ([System.IO.Path]::GetFullPath($sourceDirectory) -eq [System.IO.Path]::GetFullPath($targetDirectory)) {
@@ -876,17 +1064,21 @@ foreach ($directoryName in @("modules", "themes")) {
     Copy-Item -Path $sourceDirectory -Destination $targetDirectory -Recurse -Force
 }
 
+Write-SccInstallSubProgress -Activity "Deploying runtime" -Status "Setting up theme..." -PercentComplete 70
 $themeDirectory = Join-Path $installRoot "themes"
 $effectiveThemeName = Export-SccTheme -ThemeName $themeChoice -ThemeDirectory $themeDirectory -SourceRoot $sourceRoot
 $activeThemePath = Join-Path $themeDirectory "active.omp.json"
 
 if ($configureFonts) {
+    Write-SccInstallSubProgress -Activity "Deploying runtime" -Status "Installing Nerd Font..." -PercentComplete 75
     [void](Install-SccNerdFont -FontToken "meslo")
     if ($useWindowsTerminal) {
+        Write-SccInstallSubProgress -Activity "Deploying runtime" -Status "Configuring Windows Terminal font..." -PercentComplete 80
         $windowsTerminalSettings = Set-SccWindowsTerminalFont -FontFace $fontFace -FontSize $fontSize
         Write-SccInstallStep "Windows Terminal 设置文件: $windowsTerminalSettings"
     }
     if ($manageVsCodeProfile) {
+        Write-SccInstallSubProgress -Activity "Deploying runtime" -Status "Configuring VS Code font..." -PercentComplete 85
         $vsCodeSettings = Set-SccVsCodeTerminalFont -FontFace $fontFace -FontSize $fontSize
         foreach ($path in $vsCodeSettings) {
             Write-SccInstallStep "VS Code 设置文件: $path"
@@ -894,6 +1086,7 @@ if ($configureFonts) {
     }
 }
 
+Write-SccInstallSubProgress -Activity "Deploying runtime" -Status "Writing profiles..." -PercentComplete 90
 $managedProfiles = @{
     powershell = ""
     vscode     = ""
@@ -916,8 +1109,10 @@ foreach ($profileTarget in Get-SccManagedProfileTargets) {
     Write-SccInstallStep "已写入受管 profile: $($profileTarget.Path)"
 }
 
-$cmdHost = Configure-SccCmdHost -EnableCmdHost $enableCmdHost -InstallRoot $installRoot -ThemePath $activeThemePath
+Write-SccInstallSubProgress -Activity "Deploying runtime" -Status "Configuring CMD host..." -PercentComplete 93
+$cmdHost = Configure-SccCmdHost -EnableCmdHost $enableCmdHost -InstallRoot $installRoot -ThemePath $activeThemePath -HttpProxy $httpProxy -HttpsProxy $httpsProxy
 
+Write-SccInstallSubProgress -Activity "Deploying runtime" -Status "Creating launchers..." -PercentComplete 95
 foreach ($launcherName in @($commandName, "wtctl") | Select-Object -Unique) {
     New-SccCommandLauncher -InstallRoot $installRoot -CommandName $launcherName
 }
@@ -926,6 +1121,7 @@ if ($addToPath) {
     Add-SccUserPathEntry -InstallRoot $installRoot
 }
 
+Write-SccInstallSubProgress -Activity "Deploying runtime" -Status "Writing config..." -PercentComplete 98
 $config = New-SccInstallConfig `
     -InstallRoot $installRoot `
     -CommandName $commandName `
@@ -942,6 +1138,7 @@ $config = New-SccInstallConfig `
 
 $config | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $installRoot "scc.config.json") -Encoding UTF8
 (New-SccModuleState) | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $installRoot "module_state.json") -Encoding UTF8
+Complete-SccInstallSubProgress -Activity "Deploying runtime"
 
 Write-Host ""
 Write-Host "Install Summary" -ForegroundColor Cyan
@@ -962,6 +1159,7 @@ if ($configureProxy) {
 }
 Write-Host ""
 
+Write-SccInstallOverallProgress -StepTitle "运行验证" -StepNumber 6
 if (-not $SkipVerification -and (Get-Command pwsh -ErrorAction SilentlyContinue)) {
     Write-SccInstallSection -Title "Step 6/6 - 运行验证"
     Write-SccInstallStep "运行安装后的 smoke test ..."
@@ -971,5 +1169,6 @@ if (-not $SkipVerification -and (Get-Command pwsh -ErrorAction SilentlyContinue)
     Write-SccInstallWarn "当前会话未检测到 pwsh，已跳过 smoke test。"
 }
 
+Write-Progress -Activity "TermForge Install" -Status "Complete" -PercentComplete 100 -Id 0 -Completed
 Write-Host ""
 Write-Host "安装完成。请打开新的终端会话后使用 '$commandName doctor' 或 'wtctl doctor' 验证环境。" -ForegroundColor Green

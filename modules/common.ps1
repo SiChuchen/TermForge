@@ -767,7 +767,7 @@ function Get-SccSetupBlockingIssues {
         if ($SkipDependencyInstallFlag) {
             $issues += "当前缺少 oh-my-posh，且你要求跳过依赖安装。TermForge 无法继续。"
         } elseif ($null -eq $wingetFacts -or -not $wingetFacts.Detected) {
-            $issues += "当前缺少 oh-my-posh，且未检测到 winget，安装器无法自动补齐必需依赖。"
+            # Not a hard block - the installer will attempt to auto-install winget
         } elseif (-not $installHostFacts.IsAvailable) {
             $issues += "当前缺少 oh-my-posh，且未找到可用的 PowerShell 宿主来启动 install.ps1。"
         }
