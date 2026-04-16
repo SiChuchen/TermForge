@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul 2>&1
 setlocal
 set "TF_PWSH=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if exist "%TF_PWSH%" (
