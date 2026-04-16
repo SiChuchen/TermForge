@@ -6,3 +6,4 @@ scc.config.json
 module_state.json
 bin/
 obj/
+docs/superpowers/
