@@ -166,6 +166,7 @@ function Get-SccDefaultConfig {
     $defaultVsCodeProfile = @($profileEntries | Where-Object { $_.Name -eq "VSCode" } | Select-Object -First 1)[0]
 
     return [pscustomobject][ordered]@{
+        version = ""
         install = [pscustomobject][ordered]@{
             root = $rootPath
             addToPath = $true
@@ -848,6 +849,151 @@ function Get-SccSetupEnvironmentReport {
             } else {
                 'full'
             }
+        }
+    }
+}
+
+function Invoke-SccUpdate {
+    $rootPath = Get-SccRootPath
+    if ([string]::IsNullOrWhiteSpace($rootPath) -or -not (Test-Path $rootPath)) {
+        Write-Host "[update] 无法确定安装目录。" -ForegroundColor Red
+        return
+    }
+
+    $versionFile = Join-Path $rootPath "VERSION"
+    $currentVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { "0.0.0" }
+
+    Write-Host "[update] 当前版本: $currentVersion" -ForegroundColor Cyan
+    Write-Host "[update] 正在检查更新..." -ForegroundColor Cyan
+
+    $config = Get-SccConfig
+    $proxyUrl = ""
+    if ($config.proxy.enabled) {
+        $proxyUrl = if (-not [string]::IsNullOrWhiteSpace($config.proxy.https)) { $config.proxy.https } else { $config.proxy.http }
+    }
+
+    $previousProtocol = [Net.ServicePointManager]::SecurityProtocol
+    $previousProgress = $ProgressPreference
+    $tempDir = Join-Path $env:TEMP "TermForge-update-$(Get-Random)"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $ProgressPreference = 'SilentlyContinue'
+
+        $zipUrl = "https://github.com/SiChuchen/TermForge/archive/refs/heads/main.zip"
+        $zipPath = Join-Path $tempDir "TermForge-main.zip"
+
+        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+
+        Write-Host "[update] 正在下载最新版本..." -ForegroundColor Cyan
+        $downloadParams = @{
+            Uri             = $zipUrl
+            OutFile         = $zipPath
+            UseBasicParsing = $true
+            TimeoutSec      = 300
+        }
+        if (-not [string]::IsNullOrWhiteSpace($proxyUrl)) {
+            $downloadParams.Proxy = $proxyUrl
+            $downloadParams.ProxyUseDefaultCredentials = $true
+            Write-Host "[update] 使用代理: $proxyUrl" -ForegroundColor DarkGray
+        }
+        Invoke-WebRequest @downloadParams
+
+        Write-Host "[update] 正在解压..." -ForegroundColor Cyan
+        Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+
+        $extractedRoot = Join-Path $tempDir "TermForge-main"
+        if (-not (Test-Path $extractedRoot)) {
+            Write-Host "[update] 解压失败：未找到预期目录结构。" -ForegroundColor Red
+            return
+        }
+
+        $remoteVersionFile = Join-Path $extractedRoot "VERSION"
+        $remoteVersion = if (Test-Path $remoteVersionFile) { (Get-Content $remoteVersionFile -Raw).Trim() } else { "unknown" }
+
+        if ($remoteVersion -eq $currentVersion) {
+            Write-Host "[update] 已经是最新版本 ($currentVersion)。" -ForegroundColor Green
+            return
+        }
+
+        Write-Host "[update] 发现新版本: $currentVersion -> $remoteVersion" -ForegroundColor Cyan
+        Write-Host "[update] 正在更新文件..." -ForegroundColor Cyan
+
+        $sourceFiles = @(
+            "setup.ps1", "bootstrap.ps1", "launcher.ps1", "verify.ps1",
+            "install.ps1", "install.cmd", "uninstall.ps1", "VERSION",
+            "Microsoft.PowerShell_profile.ps1", "Microsoft.VSCode_profile.ps1",
+            "powershell.config.json", "README.md", "DESIGN.md", "MODULE_GUIDE.md"
+        )
+
+        $totalOps = $sourceFiles.Count + 2
+        $opIndex = 0
+        foreach ($file in $sourceFiles) {
+            $opIndex++
+            $src = Join-Path $extractedRoot $file
+            $dst = Join-Path $rootPath $file
+            if (Test-Path $src) {
+                Copy-Item -Path $src -Destination $dst -Force
+            }
+            $pct = [Math]::Floor(($opIndex / $totalOps) * 100)
+            Write-Progress -Activity "Updating TermForge" -Status "Copying $file" -PercentComplete $pct -Id 0
+        }
+
+        $modulesDir = Join-Path $extractedRoot "modules"
+        if (Test-Path $modulesDir) {
+            $opIndex++
+            $targetModules = Join-Path $rootPath "modules"
+            if (Test-Path $targetModules) {
+                Remove-Item -Path $targetModules -Recurse -Force
+            }
+            Copy-Item -Path $modulesDir -Destination $targetModules -Recurse -Force
+            Write-Progress -Activity "Updating TermForge" -Status "Copying modules/" -PercentComplete ([Math]::Floor(($opIndex / $totalOps) * 100)) -Id 0
+        }
+
+        $srcDir = Join-Path $extractedRoot "src"
+        if (Test-Path $srcDir) {
+            $opIndex++
+            $targetSrc = Join-Path $rootPath "src"
+            if (Test-Path $targetSrc) {
+                Remove-Item -Path $targetSrc -Recurse -Force
+            }
+            Copy-Item -Path $srcDir -Destination $targetSrc -Recurse -Force
+            Write-Progress -Activity "Updating TermForge" -Status "Copying src/" -PercentComplete ([Math]::Floor(($opIndex / $totalOps) * 100)) -Id 0
+        }
+
+        $bundledTheme = Join-Path $extractedRoot "themes\termforge.omp.json"
+        if (Test-Path $bundledTheme) {
+            $targetThemeDir = Join-Path $rootPath "themes"
+            if (-not (Test-Path $targetThemeDir)) {
+                New-Item -Path $targetThemeDir -ItemType Directory -Force | Out-Null
+            }
+            Copy-Item -Path $bundledTheme -Destination (Join-Path $targetThemeDir "termforge.omp.json") -Force
+        }
+
+        if ($null -ne $config -and -not [string]::IsNullOrWhiteSpace($remoteVersion)) {
+            $configPath = Join-Path $rootPath "scc.config.json"
+            if (Test-Path $configPath) {
+                $configJson = Get-Content -Path $configPath -Raw | ConvertFrom-Json
+                if ($configJson.PSObject.Properties['version']) {
+                    $configJson.version = $remoteVersion
+                } else {
+                    $configJson | Add-Member -MemberType NoteProperty -Name 'version' -Value $remoteVersion -Force
+                }
+                $configJson | ConvertTo-Json -Depth 20 | Set-Content -Path $configPath -Encoding UTF8
+            }
+        }
+
+        Write-Progress -Activity "Updating TermForge" -Status "Complete" -PercentComplete 100 -Id 0 -Completed
+        Write-Host ""
+        Write-Host "[update] 更新完成: $currentVersion -> $remoteVersion" -ForegroundColor Green
+        Write-Host "[update] 请重新加载终端以使用新版本（运行 '. `$PROFILE' 或重启终端）。" -ForegroundColor DarkGray
+    } catch {
+        Write-Progress -Activity "Updating TermForge" -Status "Failed" -PercentComplete 100 -Id 0 -Completed
+        Write-Host "[update] 更新失败: $($_.Exception.Message)" -ForegroundColor Red
+    } finally {
+        [Net.ServicePointManager]::SecurityProtocol = $previousProtocol
+        $ProgressPreference = $previousProgress
+        if (Test-Path $tempDir) {
+            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }

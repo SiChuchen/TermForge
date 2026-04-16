@@ -14,6 +14,7 @@ function Show-SccManagerHelp {
     Write-Host "命令:"
     Write-Host "  list | status [--json] - 查看模块状态及可用子命令"
     Write-Host "  doctor [模式]        - 执行当前会话诊断；模式: default | fancy | verbose | json"
+    Write-Host "  update               - 从 GitHub 拉取最新版本并更新（保留配置）"
     Write-Host "  enable <模块名>      - 启用已存在的模块"
     Write-Host "  disable <模块名>     - 禁用指定模块"
     Write-Host "  reload               - 重新加载当前 PowerShell profile"
@@ -115,7 +116,7 @@ function Set-SccModuleState {
 
 function Invoke-SccManagerCommand {
     param(
-        [ValidateSet('list','status','doctor','enable','disable','help','reload')][string]$Action = 'help',
+        [ValidateSet('list','status','doctor','update','enable','disable','help','reload')][string]$Action = 'help',
         [string]$Module,
         [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
     )
@@ -177,6 +178,9 @@ function Invoke-SccManagerCommand {
                     Write-Host "[SCC] 不支持的 doctor 模式: $doctorMode。可选: default, fancy, verbose, json" -ForegroundColor Red
                 }
             }
+        }
+        'update' {
+            Invoke-SccUpdate
         }
         'enable' {
             if (-not $Module) {

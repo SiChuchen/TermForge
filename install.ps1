@@ -837,7 +837,11 @@ function New-SccInstallConfig {
         [Parameter(Mandatory)]$CmdHost
     )
 
+    $versionFile = Join-Path $InstallRoot "VERSION"
+    $currentVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { "0.0.0" }
+
     return [pscustomobject][ordered]@{
+        version = $currentVersion
         install = [pscustomobject][ordered]@{
             root = $InstallRoot
             addToPath = $AddToPath
@@ -1040,7 +1044,8 @@ $runtimeFiles = @(
     "powershell.config.json",
     "install.ps1",
     "install.cmd",
-    "uninstall.ps1"
+    "uninstall.ps1",
+    "VERSION"
 )
 $totalFiles = $runtimeFiles.Count + 2
 $fileIndex = 0
