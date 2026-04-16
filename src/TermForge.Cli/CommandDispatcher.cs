@@ -13,7 +13,7 @@ internal sealed class CommandDispatcher
     private readonly IClock _clock;
     private readonly JsonConfigStore _configStore;
     private readonly WindowsEnvironmentAdapter _environmentAdapter;
-    private readonly WindowsGitProxyAdapter _gitProxyAdapter;
+    private readonly IProxyTargetAdapter _gitProxyAdapter;
     private readonly IProxyTargetAdapter _npmAdapter;
     private readonly IProxyTargetAdapter _pipAdapter;
     private readonly JsonOperationLedger _operationLedger;
@@ -111,7 +111,7 @@ internal sealed class CommandDispatcher
 
             if (string.Equals(targets, "git", StringComparison.OrdinalIgnoreCase))
             {
-                return workflow.PlanGitEnable(http, https, noProxy);
+                return workflow.PlanTargetEnable("git", http, https, noProxy);
             }
 
             if (string.Equals(targets, "npm", StringComparison.OrdinalIgnoreCase) ||
@@ -137,7 +137,7 @@ internal sealed class CommandDispatcher
 
             if (string.Equals(targets, "git", StringComparison.OrdinalIgnoreCase))
             {
-                return workflow.PlanGitDisable();
+                return workflow.PlanTargetDisable("git");
             }
 
             if (string.Equals(targets, "npm", StringComparison.OrdinalIgnoreCase) ||
