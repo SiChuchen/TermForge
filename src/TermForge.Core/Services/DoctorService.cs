@@ -12,17 +12,26 @@ public sealed class DoctorService
     private readonly string? _sharedPrimaryCommandName;
     private readonly IProxyTargetAdapter? _npmAdapter;
     private readonly IProxyTargetAdapter? _pipAdapter;
+    private readonly EnvironmentHostFacts? _hostFacts;
+    private readonly IReadOnlyList<EnvironmentToolFact>? _toolFacts;
+    private readonly EnvironmentProxyFact? _proxyEnvFact;
 
     public DoctorService(
         IConfigStore configStore,
         string? sharedPrimaryCommandName = null,
         IProxyTargetAdapter? npmAdapter = null,
-        IProxyTargetAdapter? pipAdapter = null)
+        IProxyTargetAdapter? pipAdapter = null,
+        EnvironmentHostFacts? hostFacts = null,
+        IReadOnlyList<EnvironmentToolFact>? toolFacts = null,
+        EnvironmentProxyFact? proxyEnvFact = null)
     {
         _configStore = configStore;
         _sharedPrimaryCommandName = sharedPrimaryCommandName;
         _npmAdapter = npmAdapter;
         _pipAdapter = pipAdapter;
+        _hostFacts = hostFacts;
+        _toolFacts = toolFacts;
+        _proxyEnvFact = proxyEnvFact;
     }
 
     public CommandEnvelope<DoctorPayload> BuildReport()
@@ -31,31 +40,25 @@ public sealed class DoctorService
         var targetFlags = _configStore.GetProxyTargetFlags();
         var proxyConfig = _configStore.ReadProxyConfig();
 
-        var profiles = new List<DoctorProfile>
-        {
-            new("PowerShell", "PASS", "managed profile detected", null),
-            new("VSCode", "PASS", "managed profile detected", null)
-        };
-
-        var tools = new List<DoctorTool>
-        {
-            new("config", "PASS", _configStore.GetConfigPath(), _configStore.GetConfigPath()),
-            new("module_state", "PASS", _configStore.GetModuleStatePath(), _configStore.GetModuleStatePath()),
-            new("runtime_state", "PASS", _configStore.GetRuntimeStatePath(), _configStore.GetRuntimeStatePath())
-        };
+        var profiles = BuildProfiles();
+        var tools = BuildTools();
 
         var issues = new List<DoctorIssue>();
+        CheckToolAvailability(issues);
         CheckTargetAvailability(_npmAdapter, targetFlags.Npm, "npm", issues);
         CheckTargetAvailability(_pipAdapter, targetFlags.Pip, "pip", issues);
         CheckConfigDrift(_npmAdapter, proxyConfig, "npm", issues);
         CheckConfigDrift(_pipAdapter, proxyConfig, "pip", issues);
 
-        var warnCount = issues.Count;
+        var warnCount = issues.Count(i => i.Status == "WARN");
+        var failCount = issues.Count(i => i.Status == "FAIL");
+        var overallStatus = failCount > 0 ? "FAIL" : warnCount > 0 ? "WARN" : "PASS";
+
         var payload = new DoctorPayload(
             _configStore.GetRootPath(),
             ResolvePrimaryCommandName(),
-            warnCount > 0 ? "WARN" : "PASS",
-            0,
+            overallStatus,
+            failCount,
             warnCount,
             profiles,
             enabledModules,
@@ -64,11 +67,60 @@ public sealed class DoctorService
 
         return new CommandEnvelope<DoctorPayload>(
             Command: "doctor",
-            Status: warnCount > 0 ? "WARN" : "PASS",
+            Status: overallStatus,
             GeneratedAt: DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             Warnings: [],
             Errors: [],
             Payload: payload);
+    }
+
+    private List<DoctorProfile> BuildProfiles()
+    {
+        var profiles = new List<DoctorProfile>();
+        if (_hostFacts is not null)
+        {
+            profiles.Add(new DoctorProfile("PowerShell", "PASS",
+                $"{_hostFacts.PowerShellEdition} {_hostFacts.PowerShellVersion}", null));
+            profiles.Add(new DoctorProfile("OS", "PASS",
+                _hostFacts.OsVersion, null));
+        }
+        else
+        {
+            profiles.Add(new DoctorProfile("PowerShell", "PASS", "managed profile detected", null));
+            profiles.Add(new DoctorProfile("VSCode", "PASS", "managed profile detected", null));
+        }
+        return profiles;
+    }
+
+    private List<DoctorTool> BuildTools()
+    {
+        var tools = new List<DoctorTool>();
+        if (_toolFacts is not null && _toolFacts.Count > 0)
+        {
+            foreach (var tool in _toolFacts)
+            {
+                tools.Add(new DoctorTool(tool.Name, tool.Status, tool.Message, tool.CommandPath));
+            }
+        }
+        else
+        {
+            tools.Add(new DoctorTool("config", "PASS", _configStore.GetConfigPath(), _configStore.GetConfigPath()));
+            tools.Add(new DoctorTool("module_state", "PASS", _configStore.GetModuleStatePath(), _configStore.GetModuleStatePath()));
+            tools.Add(new DoctorTool("runtime_state", "PASS", _configStore.GetRuntimeStatePath(), _configStore.GetRuntimeStatePath()));
+        }
+        return tools;
+    }
+
+    private void CheckToolAvailability(List<DoctorIssue> issues)
+    {
+        if (_toolFacts is null) return;
+        foreach (var tool in _toolFacts)
+        {
+            if (!tool.Detected && tool.Required)
+            {
+                issues.Add(new DoctorIssue($"{tool.Name}_missing", "FAIL", $"Required tool '{tool.Name}' not found: {tool.Message}"));
+            }
+        }
     }
 
     private void CheckTargetAvailability(IProxyTargetAdapter? adapter, bool targetEnabled, string targetName, List<DoctorIssue> issues)

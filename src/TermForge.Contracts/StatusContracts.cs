@@ -10,7 +10,8 @@ public sealed record StatusPayload(
     string ConfigPath,
     string ModuleStatePath,
     string RuntimeStatePath,
-    StatusProxySummary Proxy);
+    StatusProxySummary Proxy,
+    StatusEnvironmentSummary? Environment);
 
 public sealed record StatusProxySummary(
     bool Enabled,
@@ -27,3 +28,8 @@ public sealed record StatusTargetState(
     string Http,
     string Https,
     string NoProxy);
+
+public sealed record StatusEnvironmentSummary(
+    EnvironmentHostFacts? Host,
+    IReadOnlyList<EnvironmentToolFact> Tools,
+    EnvironmentProxyFact? ProxyEnvironment);

@@ -80,4 +80,47 @@ public class DoctorServiceTests
         Assert.Equal("PASS", result.Payload.OverallStatus);
         Assert.DoesNotContain(result.Payload.Issues, i => i.Name == "npm_config_drift");
     }
+
+    [Fact]
+    public void DoctorService_populates_profiles_from_host_facts()
+    {
+        var store = new FakeConfigStore { RootPath = @"E:\TF", ConfigPath = @"E:\TF\c.json", ModuleStatePath = @"E:\TF\m.json", RuntimeStatePath = @"E:\TF\s", PrimaryCommandName = "tfx" };
+        var host = new EnvironmentHostFacts(true, "10.0.19045", "Core", "7.4.0", @"C:\Users\Test\AppData\Local", @"C:\Users\Test\Documents", true);
+        var result = new TermForge.Core.Services.DoctorService(store, hostFacts: host).BuildReport();
+        Assert.Equal(2, result.Payload.Profiles.Count);
+        Assert.Contains(result.Payload.Profiles, p => p.Name == "PowerShell");
+        Assert.Contains(result.Payload.Profiles, p => p.Name == "OS");
+        Assert.Contains("Core", result.Payload.Profiles[0].Message);
+    }
+
+    [Fact]
+    public void DoctorService_adds_fail_issues_for_missing_required_tools()
+    {
+        var store = new FakeConfigStore { RootPath = @"E:\TF", ConfigPath = @"E:\TF\c.json", ModuleStatePath = @"E:\TF\m.json", RuntimeStatePath = @"E:\TF\s", PrimaryCommandName = "tfx" };
+        var tools = new List<EnvironmentToolFact>
+        {
+            new("git", false, "", true, false, "WARN", "not found in PATH"),
+            new("npm", true, "/usr/bin/npm", false, true, "PASS", "detected")
+        };
+        var result = new TermForge.Core.Services.DoctorService(store, toolFacts: tools).BuildReport();
+        Assert.Contains(result.Payload.Issues, i => i.Name == "git_missing");
+        Assert.Equal("FAIL", result.Payload.Issues.First(i => i.Name == "git_missing").Status);
+        Assert.Equal("FAIL", result.Payload.OverallStatus);
+    }
+
+    [Fact]
+    public void DoctorService_populates_tools_from_tool_facts()
+    {
+        var store = new FakeConfigStore { RootPath = @"E:\TF", ConfigPath = @"E:\TF\c.json", ModuleStatePath = @"E:\TF\m.json", RuntimeStatePath = @"E:\TF\s", PrimaryCommandName = "tfx" };
+        var tools = new List<EnvironmentToolFact>
+        {
+            new("git", true, "/usr/bin/git", true, false, "PASS", "detected"),
+            new("node", true, "/usr/bin/node", false, false, "PASS", "detected")
+        };
+        var result = new TermForge.Core.Services.DoctorService(store, toolFacts: tools).BuildReport();
+        Assert.Equal(2, result.Payload.Tools.Count);
+        Assert.Equal("git", result.Payload.Tools[0].Name);
+        Assert.Equal("node", result.Payload.Tools[1].Name);
+        Assert.Equal("/usr/bin/git", result.Payload.Tools[0].Path);
+    }
 }

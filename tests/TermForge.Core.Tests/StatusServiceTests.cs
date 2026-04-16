@@ -111,6 +111,47 @@ public class StatusServiceTests
         Assert.Equal("pip", result.Payload.Proxy.TargetStates[0].Target);
         Assert.True(result.Payload.Proxy.TargetStates[0].Enabled);
     }
+
+    [Fact]
+    public void StatusService_includes_environment_summary_when_facts_provided()
+    {
+        var store = new FakeConfigStore { RootPath = @"E:\TF", ConfigPath = @"E:\TF\c.json", ModuleStatePath = @"E:\TF\m.json", RuntimeStatePath = @"E:\TF\s", PrimaryCommandName = "tfx" };
+        var host = new EnvironmentHostFacts(true, "10.0.19045", "Core", "7.4.0", @"C:\Users\Test\AppData\Local", @"C:\Users\Test\Documents", true);
+        var tools = new List<EnvironmentToolFact>
+        {
+            new("git", true, "/usr/bin/git", true, false, "PASS", "detected"),
+            new("npm", false, "", false, true, "WARN", "not found")
+        };
+        var proxyEnv = new EnvironmentProxyFact(false, "", "", "", "none", "disabled");
+
+        var result = new TermForge.Core.Services.StatusService(store,
+            hostFacts: host, toolFacts: tools, proxyEnvFact: proxyEnv).BuildReport();
+
+        Assert.NotNull(result.Payload.Environment);
+        Assert.Equal("10.0.19045", result.Payload.Environment.Host!.OsVersion);
+        Assert.Equal("Core", result.Payload.Environment.Host.PowerShellEdition);
+        Assert.Equal(2, result.Payload.Environment.Tools.Count);
+        Assert.False(result.Payload.Environment.ProxyEnvironment!.Enabled);
+    }
+
+    [Fact]
+    public void StatusService_environment_is_null_when_no_facts_provided()
+    {
+        var store = new FakeConfigStore { RootPath = @"E:\TF", ConfigPath = @"E:\TF\c.json", ModuleStatePath = @"E:\TF\m.json", RuntimeStatePath = @"E:\TF\s", PrimaryCommandName = "tfx" };
+        var result = new TermForge.Core.Services.StatusService(store).BuildReport();
+        Assert.Null(result.Payload.Environment);
+    }
+
+    [Fact]
+    public void StatusService_environment_tools_empty_when_not_provided()
+    {
+        var store = new FakeConfigStore { RootPath = @"E:\TF", ConfigPath = @"E:\TF\c.json", ModuleStatePath = @"E:\TF\m.json", RuntimeStatePath = @"E:\TF\s", PrimaryCommandName = "tfx" };
+        var host = new EnvironmentHostFacts(true, "10.0", "Core", "7.4", "C:\\A", "C:\\D", true);
+        var result = new TermForge.Core.Services.StatusService(store, hostFacts: host).BuildReport();
+        Assert.NotNull(result.Payload.Environment);
+        Assert.Empty(result.Payload.Environment.Tools);
+        Assert.Null(result.Payload.Environment.ProxyEnvironment);
+    }
 }
 
 internal sealed class FakeConfigStore : IConfigStore

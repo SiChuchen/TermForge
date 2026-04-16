@@ -12,17 +12,26 @@ public sealed class StatusService
     private readonly string? _sharedPrimaryCommandName;
     private readonly IProxyTargetAdapter? _npmAdapter;
     private readonly IProxyTargetAdapter? _pipAdapter;
+    private readonly EnvironmentHostFacts? _hostFacts;
+    private readonly IReadOnlyList<EnvironmentToolFact>? _toolFacts;
+    private readonly EnvironmentProxyFact? _proxyEnvFact;
 
     public StatusService(
         IConfigStore configStore,
         string? sharedPrimaryCommandName = null,
         IProxyTargetAdapter? npmAdapter = null,
-        IProxyTargetAdapter? pipAdapter = null)
+        IProxyTargetAdapter? pipAdapter = null,
+        EnvironmentHostFacts? hostFacts = null,
+        IReadOnlyList<EnvironmentToolFact>? toolFacts = null,
+        EnvironmentProxyFact? proxyEnvFact = null)
     {
         _configStore = configStore;
         _sharedPrimaryCommandName = sharedPrimaryCommandName;
         _npmAdapter = npmAdapter;
         _pipAdapter = pipAdapter;
+        _hostFacts = hostFacts;
+        _toolFacts = toolFacts;
+        _proxyEnvFact = proxyEnvFact;
     }
 
     public CommandEnvelope<StatusPayload> BuildReport()
@@ -45,7 +54,10 @@ public sealed class StatusService
                 proxyConfig.Https,
                 proxyConfig.NoProxy,
                 targetFlags,
-                targetStates));
+                targetStates),
+            Environment: _hostFacts is not null || _toolFacts is not null || _proxyEnvFact is not null
+                ? new StatusEnvironmentSummary(_hostFacts, _toolFacts ?? [], _proxyEnvFact)
+                : null);
 
         return new CommandEnvelope<StatusPayload>(
             Command: "status",

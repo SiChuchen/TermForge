@@ -35,13 +35,17 @@ internal sealed class CommandDispatcher
     {
         if (args.Count == 2 && Is(args[0], "status") && Is(args[1], "--json"))
         {
-            return new StatusService(_configStore, LoadSharedPrimaryCommandName(), _npmAdapter, _pipAdapter).BuildReport();
+            var facts = LoadSharedEnvironmentFacts();
+            return new StatusService(_configStore, facts?.PrimaryCommandName, _npmAdapter, _pipAdapter,
+                facts?.Host, facts?.Tools, facts?.ProxyEnvironment).BuildReport();
         }
 
 
         if (args.Count == 2 && Is(args[0], "doctor") && Is(args[1], "--json"))
         {
-            return new DoctorService(_configStore, LoadSharedPrimaryCommandName(), _npmAdapter, _pipAdapter).BuildReport();
+            var facts = LoadSharedEnvironmentFacts();
+            return new DoctorService(_configStore, facts?.PrimaryCommandName, _npmAdapter, _pipAdapter,
+                facts?.Host, facts?.Tools, facts?.ProxyEnvironment).BuildReport();
         }
         if (args.Count >= 2 && Is(args[0], "proxy"))
         {
@@ -167,9 +171,9 @@ internal sealed class CommandDispatcher
         return new ProxyWorkflowService(_configStore, _planStore, _operationLedger, _environmentAdapter, _clock, _gitProxyAdapter, _npmAdapter, _pipAdapter);
     }
 
-    private string? LoadSharedPrimaryCommandName()
+    private SharedEnvironmentFactsBridgeResult? LoadSharedEnvironmentFacts()
     {
-        return TryLoadSharedEnvironmentFacts()?.PrimaryCommandName;
+        return TryLoadSharedEnvironmentFacts();
     }
 
     private SharedEnvironmentFactsBridgeResult? TryLoadSharedEnvironmentFacts()
