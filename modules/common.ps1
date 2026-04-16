@@ -1721,6 +1721,23 @@ function Show-SccDoctor {
         Write-SccDoctorTextLine -Label "smoke test" -Value $report.SuggestedSmokeTest
     }
 
+    # Proxy Targets section
+    try {
+        $statusOutput = Invoke-SccDotNetCli status --json 2>$null
+        $statusJson = $statusOutput | ConvertFrom-Json
+        $targetStates = @($statusJson.Payload.Proxy.TargetStates)
+        if ($targetStates.Count -gt 0) {
+            Write-SccDoctorSection -Title "Proxy Targets"
+            foreach ($ts in $targetStates) {
+                $tsStatus = if (-not $ts.Available) { "WARN" } elseif ($ts.Enabled) { "PASS" } else { "WARN" }
+                $tsMessage = if (-not $ts.Available) { "未检测到" } elseif ($ts.Enabled) { "http=$($ts.Http)" } else { "代理未启用" }
+                Write-SccDoctorStatusLine -Status $tsStatus -Label $ts.Target -Value $tsMessage
+            }
+        }
+    } catch {
+        # Skip if .NET CLI unavailable
+    }
+
     if ($report.Issues.Count -gt 0) {
         Write-SccDoctorSection -Title "Issues"
         foreach ($issue in $report.Issues) {
