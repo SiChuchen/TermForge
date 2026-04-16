@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 Describe 'setup.ps1 report modes' {
     It 'returns a JSON report without entering install when --json is used' {

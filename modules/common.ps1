@@ -1,4 +1,4 @@
-function Get-SccRootPath {
+﻿function Get-SccRootPath {
     if ($script:SccRoot -and (Test-Path $script:SccRoot)) {
         return $script:SccRoot
     }

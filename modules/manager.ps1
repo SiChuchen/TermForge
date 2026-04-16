@@ -1,4 +1,4 @@
-$commonPath = Join-Path $PSScriptRoot "common.ps1"
+﻿$commonPath = Join-Path $PSScriptRoot "common.ps1"
 if (Test-Path $commonPath) {
     . $commonPath
 }

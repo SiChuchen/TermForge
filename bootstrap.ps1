@@ -1,4 +1,4 @@
-$script:SccRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+﻿$script:SccRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $commonPath = Join-Path $script:SccRoot "modules\common.ps1"
 
 if (-not (Test-Path $commonPath)) {

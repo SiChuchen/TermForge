@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $script:SccRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $commonPath = Join-Path $script:SccRoot "modules\common.ps1"
 

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$InstallRoot = $(
         if (Test-Path (Join-Path $env:LOCALAPPDATA "TermForge")) {

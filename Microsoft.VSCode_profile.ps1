@@ -1,4 +1,4 @@
-$BootstrapPath = Join-Path $PSScriptRoot "bootstrap.ps1"
+﻿$BootstrapPath = Join-Path $PSScriptRoot "bootstrap.ps1"
 
 if (Test-Path $BootstrapPath) {
     . $BootstrapPath
