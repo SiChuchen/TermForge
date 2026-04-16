@@ -27,7 +27,7 @@ $script:ManagedBlockMarkers = @(
 $script:ManagedBlockStart = $script:ManagedBlockMarkers[0].Start
 $script:ManagedBlockEnd = $script:ManagedBlockMarkers[0].End
 
-Add-Type -AssemblyName Newtonsoft.Json
+# JSON helpers use built-in ConvertFrom-Json / ConvertTo-Json (no external dependency)
 
 function Write-SccInstallStep {
     param([Parameter(Mandatory)][string]$Message)
@@ -351,25 +351,16 @@ function Read-SccJsonObject {
         $content = $DefaultJson
     }
 
-    $reader = [Newtonsoft.Json.JsonTextReader]::new([System.IO.StringReader]::new($content))
-    $reader.DateParseHandling = [Newtonsoft.Json.DateParseHandling]::None
-
-    try {
-        $token = [Newtonsoft.Json.Linq.JToken]::ReadFrom($reader)
-    } finally {
-        $reader.Close()
+    $result = $content | ConvertFrom-Json
+    if ($null -eq $result) {
+        return [pscustomobject]@{}
     }
-
-    if ($token -is [Newtonsoft.Json.Linq.JObject]) {
-        return [Newtonsoft.Json.Linq.JObject]$token
-    }
-
-    return [Newtonsoft.Json.Linq.JObject]::new()
+    return $result
 }
 
 function Set-SccJsonObjectValue {
     param(
-        [Parameter(Mandatory)][Newtonsoft.Json.Linq.JObject]$Root,
+        [Parameter(Mandatory)][pscustomobject]$Root,
         [Parameter(Mandatory)][string[]]$PathSegments,
         [Parameter(Mandatory)]$Value
     )
@@ -377,23 +368,28 @@ function Set-SccJsonObjectValue {
     $current = $Root
     for ($index = 0; $index -lt ($PathSegments.Count - 1); $index++) {
         $segment = $PathSegments[$index]
-        $next = $current[$segment]
-        if ($null -eq $next -or $next.Type -ne [Newtonsoft.Json.Linq.JTokenType]::Object) {
-            $nextObject = [Newtonsoft.Json.Linq.JObject]::new()
-            $current[$segment] = $nextObject
+        $next = $current.$segment
+        if ($null -eq $next) {
+            $nextObject = [pscustomobject]@{}
+            $current | Add-Member -MemberType NoteProperty -Name $segment -Value $nextObject -Force
             $current = $nextObject
         } else {
-            $current = [Newtonsoft.Json.Linq.JObject]$next
+            $current = $next
         }
     }
 
-    $current[$PathSegments[-1]] = [Newtonsoft.Json.Linq.JToken]::FromObject($Value)
+    $leaf = $PathSegments[-1]
+    if ($null -ne $current.PSObject.Properties[$leaf]) {
+        $current.$leaf = $Value
+    } else {
+        $current | Add-Member -MemberType NoteProperty -Name $leaf -Value $Value -Force
+    }
 }
 
 function Save-SccJsonObject {
     param(
         [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][Newtonsoft.Json.Linq.JObject]$Root
+        [Parameter(Mandatory)]$Root
     )
 
     $directory = Split-Path -Parent $Path
@@ -401,7 +397,7 @@ function Save-SccJsonObject {
         New-Item -Path $directory -ItemType Directory -Force | Out-Null
     }
 
-    $Root.ToString([Newtonsoft.Json.Formatting]::Indented) | Set-Content -Path $Path -Encoding UTF8
+    $Root | ConvertTo-Json -Depth 20 | Set-Content -Path $Path -Encoding UTF8
 }
 
 function Find-SccWindowsTerminalSettingsPath {

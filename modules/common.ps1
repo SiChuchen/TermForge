@@ -366,22 +366,37 @@ function Read-SccJsonDocuments {
     param([Parameter(Mandatory)][string]$Content)
 
     $documents = @()
-    $stringReader = [System.IO.StringReader]::new($Content)
-    $jsonReader = [Newtonsoft.Json.JsonTextReader]::new($stringReader)
-    $jsonReader.DateParseHandling = [Newtonsoft.Json.DateParseHandling]::None
-    $jsonReader.SupportMultipleContent = $true
+    $depth = 0
+    $inString = $false
+    $escape = $false
+    $start = -1
 
-    try {
-        while ($jsonReader.Read()) {
-            if ($jsonReader.TokenType -eq [Newtonsoft.Json.JsonToken]::Comment) {
-                continue
-            }
-
-            $documents += ,([Newtonsoft.Json.Linq.JToken]::ReadFrom($jsonReader))
+    for ($i = 0; $i -lt $Content.Length; $i++) {
+        $c = $Content[$i]
+        if ($escape) {
+            $escape = $false
+            continue
         }
-    } finally {
-        $jsonReader.Close()
-        $stringReader.Close()
+        if ($inString -and $c -eq '\') {
+            $escape = $true
+            continue
+        }
+        if ($c -eq '"') {
+            $inString = -not $inString
+            continue
+        }
+        if ($inString) { continue }
+
+        if ($c -eq '{' -or $c -eq '[') {
+            if ($depth -eq 0) { $start = $i }
+            $depth++
+        } elseif ($c -eq '}' -or $c -eq ']') {
+            $depth--
+            if ($depth -eq 0 -and $start -ge 0) {
+                $documents += ,$Content.Substring($start, $i - $start + 1).Trim()
+                $start = -1
+            }
+        }
     }
 
     return @($documents)
@@ -408,23 +423,28 @@ function Read-SccJsonFile {
         $primaryError = $_.Exception.Message
 
         try {
-            $documents = Read-SccJsonDocuments -Content $content
+            $rawDocuments = Read-SccJsonDocuments -Content $content
         } catch {
             throw "无法读取 JSON 文件 '$Path'：$primaryError"
         }
 
-        if ($documents.Count -le 1) {
+        if ($rawDocuments.Count -le 1) {
             throw "无法读取 JSON 文件 '$Path'：$primaryError"
         }
 
-        $firstDocument = $documents[0]
-        foreach ($document in $documents | Select-Object -Skip 1) {
-            if (-not [Newtonsoft.Json.Linq.JToken]::DeepEquals($firstDocument, $document)) {
+        $parsedDocs = @()
+        foreach ($raw in $rawDocuments) {
+            $parsedDocs += ,($raw | ConvertFrom-Json -ErrorAction Stop)
+        }
+
+        $firstNormalized = $parsedDocs[0] | ConvertTo-Json -Depth 20 -Compress
+        foreach ($doc in $parsedDocs | Select-Object -Skip 1) {
+            if (($doc | ConvertTo-Json -Depth 20 -Compress) -ne $firstNormalized) {
                 throw "无法读取 JSON 文件 '$Path'：文件包含多个顶层 JSON 文档，且内容不一致，请手动修复。"
             }
         }
 
-        $normalizedContent = $firstDocument.ToString([Newtonsoft.Json.Formatting]::Indented)
+        $normalizedContent = $parsedDocs[0] | ConvertTo-Json -Depth 20
         Set-Content -Path $Path -Value $normalizedContent -Encoding UTF8
         return ($normalizedContent | ConvertFrom-Json -ErrorAction Stop)
     }
