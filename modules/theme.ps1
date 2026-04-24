@@ -326,6 +326,29 @@ function Save-SccSelectedThemeName {
     Set-SccThemeRuntimeState
 }
 
+function Get-SccInitCacheFingerprint {
+    param([Parameter(Mandatory)][string]$ThemePath, [string]$OmpExecutable)
+
+    $themeMtime = ""
+    if (Test-Path $ThemePath) {
+        $themeMtime = (Get-Item $ThemePath).LastWriteTimeUtc.Ticks.ToString()
+    }
+
+    $ompMtime = ""
+    $ompCmd = Get-Command $OmpExecutable -ErrorAction SilentlyContinue
+    if ($null -ne $ompCmd -and -not [string]::IsNullOrWhiteSpace($ompCmd.Source)) {
+        if (Test-Path $ompCmd.Source) {
+            $ompMtime = (Get-Item $ompCmd.Source).LastWriteTimeUtc.Ticks.ToString()
+        }
+    }
+
+    return "$themeMtime|$ompMtime"
+}
+
+function Get-SccInitCachePath {
+    return (Join-Path $script:ThemeDir ".init-cache.ps1")
+}
+
 function Invoke-SccThemeActivation {
     param(
         [Parameter(Mandatory)][string]$ThemeName,
@@ -379,7 +402,26 @@ function Invoke-SccThemeActivation {
     $ErrorActionPreference = 'Stop'
 
     try {
-        & $themeExecutable init pwsh --config $themePath | Invoke-Expression
+        $cacheFile = Get-SccInitCachePath
+        $fingerprint = Get-SccInitCacheFingerprint -ThemePath $themePath -OmpExecutable $themeExecutable
+        $fingerprintFile = Join-Path $script:ThemeDir ".init-cache.fp"
+
+        $cacheHit = $false
+        if ((Test-Path $cacheFile) -and (Test-Path $fingerprintFile)) {
+            $savedFp = (Get-Content -Path $fingerprintFile -Raw).Trim()
+            if ($savedFp -eq $fingerprint) {
+                $cacheHit = $true
+            }
+        }
+
+        if ($cacheHit) {
+            . $cacheFile
+        } else {
+            $initOutput = & $themeExecutable init pwsh --config $themePath 2>$null
+            $initOutput | Set-Content -Path $cacheFile -Encoding UTF8
+            $fingerprint | Set-Content -Path $fingerprintFile -Encoding UTF8
+            Invoke-Expression $initOutput
+        }
 
         if ($Persist) {
             Save-SccSelectedThemeName -ThemeName $ThemeName
