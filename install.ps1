@@ -488,7 +488,9 @@ function Remove-SccManagedBlock {
 
     $result = $Content
     foreach ($marker in $script:ManagedBlockMarkers) {
-        $pattern = "(?ms)^\Q$($marker.Start)\E.*?^\Q$($marker.End)\E\r?\n?"
+        $escapedStart = [regex]::Escape($marker.Start)
+        $escapedEnd = [regex]::Escape($marker.End)
+        $pattern = "(?ms)^$escapedStart.*?^$escapedEnd\r?\n?"
         $result = [regex]::Replace($result, $pattern, "")
     }
     return $result.TrimEnd("`r", "`n")
@@ -1274,13 +1276,13 @@ if ($NonInteractive) {
             Root         = $installRoot
             Command      = $commandName
             Fallback     = "wtctl"
-            PowerShell   = $managePowerShellProfile
-            VSCode       = $manageVsCodeProfile
-            WindowsTerm  = $useWindowsTerminal
+            PowerShell   = [bool]$managePowerShellProfile
+            VSCode       = [bool]$manageVsCodeProfile
+            WindowsTerm  = [bool]$useWindowsTerminal
             Theme        = $effectiveThemeName
             CMDHost      = [bool]$cmdHost.Enabled
             Font         = "$fontFace ($fontSize)"
-            ProxyEnabled = $configureProxy
+            ProxyEnabled = [bool]$configureProxy
         }
     }
     $installResult | ConvertTo-Json -Depth 6
