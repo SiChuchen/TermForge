@@ -4,28 +4,14 @@
 
 默认主命令是 `termforge`，但安装向导允许用户自定义；`wtctl` 始终保留为固定恢复入口。
 
+> **AI Agent？** 如果你是一个 AI agent（Claude Code、Copilot 等），请直接阅读 [SKILL.md](./SKILL.md)，里面有完整的机器可读命令参考、调用方式和限制说明。
+
 ## 适用场景
 
-- 想把 PowerShell profile 从“个人脚本目录”升级成可安装项目
+- 想把 PowerShell profile 从"个人脚本目录"升级成可安装项目
 - 需要统一管理 PowerShell、VS Code PowerShell 和 CMD 的启动体验
 - 希望主题、代理、字体和诊断能力都由仓库管理，而不是散落在本机各处
 - 需要一个可以安装、回滚、验证并持续演进的 Windows 终端基线
-
-## 当前能力
-
-- 交互式安装器：`install.cmd` / `install.ps1`
-- 预检入口：`setup.ps1`
-- 卸载与回滚：`uninstall.ps1`
-- 受管 profile 注入，不覆盖用户整个 profile
-- 动态主命令，默认 `termforge`
-- 固定恢复入口 `wtctl`
-- `proxy` / `theme` 两个基础模块
-- `termforge doctor` 诊断输出与 `verify.ps1` smoke test
-- `.NET` 控制面 CLI，当前承接 `status --json`、`doctor --json`、standalone `env` 目标 `proxy scan/plan/apply/rollback`，以及 standalone `git` 目标 `proxy plan/apply/rollback`
-- `setup --json`、`status --json`、`doctor json` 共享同一套环境事实来源，但各自保留独立的最终输出 schema
-- CMD + Clink + Oh My Posh 集成
-- Nerd Font 安装与 Windows Terminal / VS Code 字体写入
-- 本地回环默认代理绕过：`127.0.0.1,localhost,::1`
 
 ## Quick Start
 
@@ -47,6 +33,27 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 termforge doctor
 wtctl doctor
 ```
+
+如果需要无人值守安装（脚本、CI、agent），参见 [无人值守安装](#无人值守安装)。
+
+## 当前能力
+
+- 交互式安装器：`install.cmd` / `install.ps1`
+- 无人值守安装：`install.ps1 -NonInteractive`
+- 预检入口：`setup.ps1`
+- 卸载与回滚：`uninstall.ps1`
+- 自更新：`termforge update`
+- 受管 profile 注入，不覆盖用户整个 profile
+- 动态主命令，默认 `termforge`
+- 固定恢复入口 `wtctl`
+- `proxy` / `theme` 两个基础模块
+- `termforge doctor` 诊断输出与 `verify.ps1` smoke test
+- 所有命令支持 `--json` 输出（参见 [Agent 使用指南](#agent-使用指南)）
+- `.NET` 控制面 CLI，当前承接 `status --json`、`doctor --json`、standalone `env` 目标 `proxy scan/plan/apply/rollback`，以及 standalone `git` 目标 `proxy plan/apply/rollback`
+- `setup --json`、`status --json`、`doctor json` 共享同一套环境事实来源，但各自保留独立的最终输出 schema
+- CMD + Clink + Oh My Posh 集成
+- Nerd Font 安装与 Windows Terminal / VS Code 字体写入
+- 本地回环默认代理绕过：`127.0.0.1,localhost,::1`
 
 ## 运行时模型
 
@@ -84,7 +91,7 @@ PowerShell 继续保留为安装器、profile 注入和命令入口；`status --
 
 安装脚本会按步骤询问真实需求，而不是默认把所有组件都装上：
 
-`setup.ps1` 现在同时承担“预检入口”和“环境报告入口”：
+`setup.ps1` 现在同时承担"预检入口"和"环境报告入口"：
 
 - `./setup.ps1`：输出预检摘要，并在可继续时进入安装向导
 - `./setup.ps1 --json`：输出结构化环境报告，不进入安装向导
@@ -110,9 +117,33 @@ PowerShell 继续保留为安装器、profile 注入和命令入口；`status --
 - `setup.ps1` 的环境报告会显示当前代理环境变量可见性，包括 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`
 - 如果缺少 `oh-my-posh` 且又无法自动安装，预检会直接阻断，而不是让用户走到一半才失败
 
+### 无人值守安装
+
+安装器支持 `-NonInteractive` 模式，适用于脚本化部署、CI 管道或 AI agent 调用：
+
+```powershell
+# 最小化安装（使用全部默认值）
+pwsh -NoProfile -File install.ps1 -NonInteractive
+
+# 指定关键选项
+pwsh -NoProfile -File install.ps1 -NonInteractive `
+    -CommandName "termforge" `
+    -ManagePowerShellProfile `
+    -AddToPath
+
+# 带代理
+pwsh -NoProfile -File install.ps1 -NonInteractive `
+    -ManagePowerShellProfile -AddToPath `
+    -ConfigureProxy `
+    -HttpProxy "http://proxy.corp:8080" `
+    -HttpsProxy "http://proxy.corp:8443"
+```
+
+完整参数列表见 [SKILL.md — Installation](./SKILL.md#installation)。
+
 ## 兼容性结论
 
-如果用户是在一台“几乎没有额外工具”的 Windows 10/11 机器上安装，是否能直接用，取决于两件事：
+如果用户是在一台"几乎没有额外工具"的 Windows 10/11 机器上安装，是否能直接用，取决于两件事：
 
 - 是否至少满足 Windows 10 / 11 基线
 - 是否能拿到 `oh-my-posh`
@@ -123,7 +154,7 @@ PowerShell 继续保留为安装器、profile 注入和命令入口；`status --
 - Windows 10/11 上如果没有 `winget`，但已经手动装过 `oh-my-posh`，也可以继续
 - 如果既没有 `winget`，也没有 `oh-my-posh`，安装器会在预检阶段直接停止，并告诉用户为什么不能继续
 
-这意味着我们不需要维护多套“Windows 10 安装器 / Windows 11 安装器 / VS Code 安装器”，而是采用：
+这意味着我们不需要维护多套"Windows 10 安装器 / Windows 11 安装器 / VS Code 安装器"，而是采用：
 
 - 一层预检入口：`setup.ps1`
 - 一层主安装向导：`install.ps1`
@@ -133,23 +164,31 @@ PowerShell 继续保留为安装器、profile 注入和命令入口；`status --
 ## 核心命令
 
 ```powershell
-termforge list
-termforge doctor
-termforge doctor fancy
-termforge doctor json
-termforge status --json
-proxy scan --json
-proxy plan --mode enable --targets env --http http://127.0.0.1:7890 --https http://127.0.0.1:7890 --no-proxy 127.0.0.1,localhost,::1 --json
-proxy plan --mode enable --targets git --http http://127.0.0.1:7890 --https http://127.0.0.1:7890 --no-proxy 127.0.0.1,localhost,::1 --json
+termforge list              # 查看模块状态
+termforge list --json       # JSON 输出
+termforge doctor            # 诊断（默认模式）
+termforge doctor fancy      # 彩色图标模式
+termforge doctor verbose    # 详细模式
+termforge doctor --json     # JSON 诊断
+termforge update            # 自更新
+termforge update --json     # 自更新（JSON 输出）
+termforge enable proxy      # 启用模块
+termforge disable theme     # 禁用模块
+termforge reload            # 重新加载 profile
+
+# 代理
+proxy                       # 查看代理状态
+proxy scan --json           # 扫描代理
+proxy plan --mode enable --targets env --http http://127.0.0.1:7890 --json
 proxy apply --plan-id <id> --json
 proxy rollback --change-id <id> --json
-termforge help proxy
-proxy
 proxy bypass add 127.0.0.1 localhost host.docker.internal
-posh
-poshl
-posht <theme>
-poshs <theme>
+
+# 主题
+posh                        # 当前主题
+poshl                       # 列出主题
+posht <theme>               # 临时预览
+poshs <theme>               # 永久切换
 ```
 
 说明：
@@ -187,6 +226,7 @@ poshs <theme>
 
 ```json
 {
+  "version": "0.9.0",
   "install": {
     "root": "C:\\Users\\you\\AppData\\Local\\TermForge",
     "addToPath": true,
@@ -239,6 +279,7 @@ poshs <theme>
 - `modules/theme.ps1`: Oh My Posh 主题模块
 - `themes/termforge.omp.json`: 内置默认主题
 - `verify.ps1`: 仓库级 smoke test
+- `SKILL.md`: AI Agent 命令参考
 
 ## 验证
 
@@ -254,13 +295,54 @@ pwsh -NoProfile -File .\verify.ps1
 termforge doctor
 termforge doctor fancy
 termforge doctor verbose
-termforge doctor json
+termforge doctor --json
 ```
 
 说明：
 
 - 仓库根目录运行自检时，如果本地缺少 `scc.config.json` / `module_state.json`，脚本会自动生成
 - 这些本地运行时文件，以及 `themes/active.omp.json`、zip 打包产物，都不进入 git
+
+## Agent 使用指南
+
+TermForge 的所有命令都支持 `--json` 输出，返回统一的 `CommandEnvelope` 结构，便于 AI agent 程序化调用。
+
+完整的 agent 命令参考、调用方式和限制说明见 **[SKILL.md](./SKILL.md)**。
+
+### Agent 调用前提
+
+Agent 使用 TermForge 命令有以下硬性前提：
+
+1. **目标机器必须是 Windows 10/11** — TermForge 不支持其他操作系统
+2. **目标机器必须有 PowerShell** — 至少需要 Windows PowerShell 5.1（`powershell.exe`），推荐 PowerShell 7（`pwsh`）
+3. **Agent 必须能执行 PowerShell 命令** — 通过 `pwsh -NoProfile -Command "..."` 或等效方式
+4. **TermForge 的命令只在加载了 profile 的 PowerShell session 中可用** — Agent 不能直接 `termforge list`，而需要先加载 TermForge 入口：
+
+```bash
+# 正确的 agent 调用方式
+pwsh -NoProfile -Command ". (Join-Path $env:LOCALAPPDATA 'TermForge\Microsoft.PowerShell_profile.ps1'); termforge list --json"
+
+# 或者如果安装目录在 PATH 中（安装时选了 AddToPath）
+pwsh -NoProfile -Command "& termforge.cmd list --json"
+```
+
+5. **安装前不需要 TermForge 已存在** — 使用 `install.ps1 -NonInteractive` 可以在干净机器上直接安装
+
+### 快速检测
+
+```bash
+# 检查是否已安装
+pwsh -NoProfile -Command "Test-Path (Join-Path $env:LOCALAPPDATA 'TermForge\scc.config.json')"
+```
+
+### 典型 Agent 工作流
+
+```
+安装 → termforge doctor --json → 确认 Status == PASS
+更新 → termforge update --json → 检查 UpdatedFiles
+代理 → proxy plan → proxy apply → proxy scan --json 验证
+诊断 → termforge doctor --json → 读取 Payload.Results 定位问题
+```
 
 ## 当前边界
 

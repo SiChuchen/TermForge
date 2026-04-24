@@ -9,8 +9,22 @@ param(
             Join-Path $env:LOCALAPPDATA "TermForge"
         }
     ),
+    [string]$CommandName = "",
+    [switch]$AddToPath,
+    [switch]$ManagePowerShellProfile,
+    [switch]$ManageVsCodeProfile,
+    [switch]$EnableCmdHost,
+    [switch]$ConfigureProxy,
+    [string]$HttpProxy = "",
+    [string]$HttpsProxy = "",
+    [string]$NoProxy = "127.0.0.1,localhost,::1",
+    [string]$ThemeName = "termforge",
+    [string]$FontFace = "MesloLGM Nerd Font",
+    [int]$FontSize = 12,
+    [switch]$ConfigureFonts,
     [switch]$SkipDependencyInstall,
-    [switch]$SkipVerification
+    [switch]$SkipVerification,
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = "Stop"
@@ -219,6 +233,11 @@ function Read-SccInstallText {
         [string]$Default = ""
     )
 
+    if ($NonInteractive) {
+        Write-SccInstallStep "$Prompt = $Default"
+        return $Default
+    }
+
     $suffix = if ([string]::IsNullOrWhiteSpace($Default)) { "" } else { " [$Default]" }
     $value = Read-Host "$Prompt$suffix"
     if ([string]::IsNullOrWhiteSpace($value)) {
@@ -233,6 +252,11 @@ function Read-SccInstallBool {
         [Parameter(Mandatory)][string]$Prompt,
         [bool]$Default = $true
     )
+
+    if ($NonInteractive) {
+        Write-SccInstallStep "$Prompt = $Default"
+        return $Default
+    }
 
     $defaultToken = if ($Default) { "Y/n" } else { "y/N" }
     while ($true) {
@@ -256,6 +280,11 @@ function Read-SccInstallInt {
         [Parameter(Mandatory)][string]$Prompt,
         [int]$Default
     )
+
+    if ($NonInteractive) {
+        Write-SccInstallStep "$Prompt = $Default"
+        return $Default
+    }
 
     while ($true) {
         $value = Read-SccInstallText -Prompt $Prompt -Default $Default
@@ -951,32 +980,67 @@ $sourceRoot = $PSScriptRoot
 $installRoot = [System.IO.Path]::GetFullPath($InstallRoot)
 
 Write-Host ""
-Write-Host "TermForge interactive installer" -ForegroundColor Cyan
+if ($NonInteractive) {
+    Write-Host "TermForge non-interactive installer" -ForegroundColor Cyan
+} else {
+    Write-Host "TermForge interactive installer" -ForegroundColor Cyan
+}
 Write-Host "Source : $sourceRoot"
 Write-Host "Target : $installRoot"
-Write-Host "默认主命令是 termforge；你可以在安装过程中改成别的名字。" -ForegroundColor DarkGray
-Write-Host "固定恢复入口始终是 wtctl；代理默认关闭，需要时再按向导填写。" -ForegroundColor DarkGray
+if (-not $NonInteractive) {
+    Write-Host "默认主命令是 termforge；你可以在安装过程中改成别的名字。" -ForegroundColor DarkGray
+    Write-Host "固定恢复入口始终是 wtctl；代理默认关闭，需要时再按向导填写。" -ForegroundColor DarkGray
+}
 Write-Host ""
 
 Write-SccInstallOverallProgress -StepTitle "基本设置" -StepNumber 1
 Write-SccInstallSection -Title "Step 1/6 - 基本设置"
 $installRoot = [System.IO.Path]::GetFullPath((Read-SccInstallText -Prompt "安装目录" -Default $installRoot))
-$commandName = Read-SccInstallCommandName -Default "termforge"
-$addToPath = Read-SccInstallBool -Prompt "是否将安装目录加入用户 PATH（便于从 cmd / PowerShell 直接执行命令）" -Default $true
+if ($NonInteractive -and -not [string]::IsNullOrWhiteSpace($CommandName)) {
+    $commandName = $CommandName
+    Write-SccInstallStep "主命令名 = $commandName"
+} else {
+    $commandName = Read-SccInstallCommandName -Default "termforge"
+}
+if ($NonInteractive -and $AddToPath.IsPresent) {
+    $addToPath = $true
+    Write-SccInstallStep "加入 PATH = $addToPath"
+} else {
+    $addToPath = Read-SccInstallBool -Prompt "是否将安装目录加入用户 PATH（便于从 cmd / PowerShell 直接执行命令）" -Default $true
+}
 
 Write-SccInstallOverallProgress -StepTitle "宿主选择" -StepNumber 2
-$hostPlan = Read-SccInstallHostPlan
-$managePowerShellProfile = [bool]$hostPlan.ManagePowerShellProfile
-$manageVsCodeProfile = [bool]$hostPlan.ManageVsCodeProfile
-$enableCmdHost = [bool]$hostPlan.EnableCmdHost
-$useWindowsTerminal = [bool]$hostPlan.UseWindowsTerminal
+if ($NonInteractive) {
+    $managePowerShellProfile = $ManagePowerShellProfile.IsPresent
+    $manageVsCodeProfile = $ManageVsCodeProfile.IsPresent
+    $enableCmdHost = $EnableCmdHost.IsPresent
+    $useWindowsTerminal = $false
+    Write-SccInstallStep "PowerShell profile = $managePowerShellProfile"
+    Write-SccInstallStep "VS Code profile = $manageVsCodeProfile"
+    Write-SccInstallStep "CMD host = $enableCmdHost"
+    Write-SccInstallStep "Windows Terminal = $useWindowsTerminal"
+} else {
+    $hostPlan = Read-SccInstallHostPlan
+    $managePowerShellProfile = [bool]$hostPlan.ManagePowerShellProfile
+    $manageVsCodeProfile = [bool]$hostPlan.ManageVsCodeProfile
+    $enableCmdHost = [bool]$hostPlan.EnableCmdHost
+    $useWindowsTerminal = [bool]$hostPlan.UseWindowsTerminal
+}
 
 Write-SccInstallOverallProgress -StepTitle "代理设置" -StepNumber 3
-$proxyConfig = Read-SccInstallProxyConfig
-$configureProxy = [bool]$proxyConfig.Enabled
-$httpProxy = $proxyConfig.Http
-$httpsProxy = $proxyConfig.Https
-$noProxy = $proxyConfig.NoProxy
+if ($NonInteractive) {
+    $configureProxy = $ConfigureProxy.IsPresent
+    $httpProxy = $HttpProxy
+    $httpsProxy = $HttpsProxy
+    $noProxy = $NoProxy
+    Write-SccInstallStep "代理 = $configureProxy"
+} else {
+    $proxyConfig = Read-SccInstallProxyConfig
+    $configureProxy = [bool]$proxyConfig.Enabled
+    $httpProxy = $proxyConfig.Http
+    $httpsProxy = $proxyConfig.Https
+    $noProxy = $proxyConfig.NoProxy
+}
 
 Write-SccInstallOverallProgress -StepTitle "依赖与主题" -StepNumber 4
 Write-SccInstallSection -Title "Step 4/6 - 依赖与主题" -Notes @(
@@ -984,18 +1048,35 @@ Write-SccInstallSection -Title "Step 4/6 - 依赖与主题" -Notes @(
     "Windows Terminal 只会在你选择要用它时才会参与安装/配置。"
 )
 
-$themeChoice = Read-SccInstallText -Prompt "默认主题名" -Default "termforge"
-$configureFonts = Read-SccInstallBool -Prompt "是否自动安装 Nerd Font 并配置所选宿主的终端字体" -Default $true
-if ($configureFonts) {
-    $fontFace = Read-SccInstallText -Prompt "字体名称" -Default "MesloLGM Nerd Font"
-    $fontSize = Read-SccInstallInt -Prompt "字体大小" -Default 12
+$themeChoice = if ($NonInteractive -and -not [string]::IsNullOrWhiteSpace($ThemeName)) { $ThemeName } else { Read-SccInstallText -Prompt "默认主题名" -Default "termforge" }
+if ($NonInteractive -and $ConfigureFonts.IsPresent) {
+    $configureFonts = $true
+    $fontFace = $FontFace
+    $fontSize = $FontSize
+    Write-SccInstallStep "字体 = $fontFace ($fontSize)"
+} elseif ($NonInteractive) {
+    $configureFonts = $false
+    $fontFace = $FontFace
+    $fontSize = $FontSize
+    Write-SccInstallStep "字体安装 = 跳过"
 } else {
-    $fontFace = "MesloLGM Nerd Font"
-    $fontSize = 12
+    $configureFonts = Read-SccInstallBool -Prompt "是否自动安装 Nerd Font 并配置所选宿主的终端字体" -Default $true
+    if ($configureFonts) {
+        $fontFace = Read-SccInstallText -Prompt "字体名称" -Default "MesloLGM Nerd Font"
+        $fontSize = Read-SccInstallInt -Prompt "字体大小" -Default 12
+    } else {
+        $fontFace = "MesloLGM Nerd Font"
+        $fontSize = 12
+    }
 }
 
 if ($managePowerShellProfile -or $manageVsCodeProfile) {
-    $shouldInstallPowerShell = Read-SccInstallBool -Prompt "若缺少 pwsh，是否自动安装 PowerShell 7（推荐，用于 PowerShell / VS Code）" -Default $true
+    if ($NonInteractive) {
+        $shouldInstallPowerShell = $true
+        Write-SccInstallStep "PowerShell 7 自动安装 = true"
+    } else {
+        $shouldInstallPowerShell = Read-SccInstallBool -Prompt "若缺少 pwsh，是否自动安装 PowerShell 7（推荐，用于 PowerShell / VS Code）" -Default $true
+    }
 } else {
     $shouldInstallPowerShell = $false
 }
@@ -1009,7 +1090,12 @@ if ($shouldInstallPowerShell) {
 Ensure-SccRequiredDependency -CommandName "oh-my-posh" -WingetId "JanDeDobbeleer.OhMyPosh" -FriendlyName "Oh My Posh" -Reason "主题初始化、PowerShell 提示符和 CMD/Clink 集成都依赖它。" -HttpProxy $httpProxy -HttpsProxy $httpsProxy
 
 if ($useWindowsTerminal) {
-    $shouldInstallWindowsTerminal = Read-SccInstallBool -Prompt "若缺少 Windows Terminal，是否自动安装" -Default $true
+    if ($NonInteractive) {
+        $shouldInstallWindowsTerminal = $true
+        Write-SccInstallStep "Windows Terminal 自动安装 = true"
+    } else {
+        $shouldInstallWindowsTerminal = Read-SccInstallBool -Prompt "若缺少 Windows Terminal，是否自动安装" -Default $true
+    }
 } else {
     $shouldInstallWindowsTerminal = $false
 }
@@ -1175,5 +1261,30 @@ if (-not $SkipVerification -and (Get-Command pwsh -ErrorAction SilentlyContinue)
 }
 
 Write-Progress -Activity "TermForge Install" -Status "Complete" -PercentComplete 100 -Id 0 -Completed
-Write-Host ""
-Write-Host "安装完成。请打开新的终端会话后使用 '$commandName doctor' 或 'wtctl doctor' 验证环境。" -ForegroundColor Green
+
+if ($NonInteractive) {
+    $installResult = [pscustomobject][ordered]@{
+        SchemaVersion = "2026-04-11"
+        Command       = "install"
+        Status        = "PASS"
+        GeneratedAt   = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+        Warnings      = @()
+        Errors        = @()
+        Payload       = [pscustomobject][ordered]@{
+            Root         = $installRoot
+            Command      = $commandName
+            Fallback     = "wtctl"
+            PowerShell   = $managePowerShellProfile
+            VSCode       = $manageVsCodeProfile
+            WindowsTerm  = $useWindowsTerminal
+            Theme        = $effectiveThemeName
+            CMDHost      = [bool]$cmdHost.Enabled
+            Font         = "$fontFace ($fontSize)"
+            ProxyEnabled = $configureProxy
+        }
+    }
+    $installResult | ConvertTo-Json -Depth 6
+} else {
+    Write-Host ""
+    Write-Host "安装完成。请打开新的终端会话后使用 '$commandName doctor' 或 'wtctl doctor' 验证环境。" -ForegroundColor Green
+}

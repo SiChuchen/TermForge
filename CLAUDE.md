@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Agent Usage
+
+If you are an AI agent performing tasks for the user (not editing this codebase), see **SKILL.md** for the complete agent-facing command reference. It covers installation, runtime commands (`--json` output), proxy workflow, diagnostics, and invocation patterns.
+
 ## Project Overview
 
 TermForge is a managed Windows shell runtime that turns PowerShell/CMD profile management into an installable, rollbackable project. It ships as a dual-stack system: **PowerShell** handles Windows host integration, installation, profile injection, and human-readable commands; **.NET** provides a portable control core for machine-readable JSON contracts (`status --json`, `doctor json`, `proxy scan/plan/apply/rollback --json`).
@@ -43,7 +47,7 @@ This separation means install/uninstall only touches the injection block, never 
 
 ### PowerShell Module System
 
-- `modules/common.ps1` — config I/O, JSON file store with mutex locking and corruption recovery, help registry, diagnostics (`doctor`), command envelope factory, shared environment facts
+- `modules/common.ps1` — config I/O, JSON file store with mutex locking and corruption recovery, help registry, diagnostics (`doctor`), command envelope factory (`New-SccCommandEnvelope`), shared environment facts
 - `modules/manager.ps1` — binds the configurable primary command (default: `termforge`) and fallback (`wtctl`) to `Invoke-SccManagerCommand`
 - `modules/proxy.ps1` — proxy module, bridges `scan/plan/apply/rollback --json` to .NET CLI
 - `modules/theme.ps1` — Oh My Posh theme management

@@ -853,9 +853,35 @@ function Get-SccSetupEnvironmentReport {
     }
 }
 
+function New-SccCommandEnvelope {
+    param(
+        [Parameter(Mandatory)][string]$Command,
+        [Parameter(Mandatory)][string]$Status,
+        $Payload = $null,
+        [string[]]$Warnings = @(),
+        [string[]]$Errors = @()
+    )
+
+    return [pscustomobject][ordered]@{
+        SchemaVersion = "2026-04-11"
+        Command       = $Command
+        Status        = $Status
+        GeneratedAt   = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+        Warnings      = @($Warnings)
+        Errors        = @($Errors)
+        Payload       = $Payload
+    }
+}
+
 function Invoke-SccUpdate {
+    param([switch]$JsonOutput)
+
     $rootPath = Get-SccRootPath
     if ([string]::IsNullOrWhiteSpace($rootPath) -or -not (Test-Path $rootPath)) {
+        if ($JsonOutput) {
+            New-SccCommandEnvelope -Command "update" -Status "FAIL" -Errors @("无法确定安装目录") | ConvertTo-Json -Depth 4
+            return
+        }
         Write-Host "[update] 无法确定安装目录。" -ForegroundColor Red
         return
     }
@@ -863,8 +889,10 @@ function Invoke-SccUpdate {
     $versionFile = Join-Path $rootPath "VERSION"
     $currentVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { "0.0.0" }
 
-    Write-Host "[update] 当前版本: $currentVersion" -ForegroundColor Cyan
-    Write-Host "[update] 正在检查更新..." -ForegroundColor Cyan
+    if (-not $JsonOutput) {
+        Write-Host "[update] 当前版本: $currentVersion" -ForegroundColor Cyan
+        Write-Host "[update] 正在检查更新..." -ForegroundColor Cyan
+    }
 
     $config = Get-SccConfig
     $proxyUrl = ""
@@ -884,7 +912,9 @@ function Invoke-SccUpdate {
 
         New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
 
-        Write-Host "[update] 正在下载最新版本..." -ForegroundColor Cyan
+        if (-not $JsonOutput) {
+            Write-Host "[update] 正在下载最新版本..." -ForegroundColor Cyan
+        }
         $downloadParams = @{
             Uri             = $zipUrl
             OutFile         = $zipPath
@@ -894,15 +924,23 @@ function Invoke-SccUpdate {
         if (-not [string]::IsNullOrWhiteSpace($proxyUrl)) {
             $downloadParams.Proxy = $proxyUrl
             $downloadParams.ProxyUseDefaultCredentials = $true
-            Write-Host "[update] 使用代理: $proxyUrl" -ForegroundColor DarkGray
+            if (-not $JsonOutput) {
+                Write-Host "[update] 使用代理: $proxyUrl" -ForegroundColor DarkGray
+            }
         }
         Invoke-WebRequest @downloadParams
 
-        Write-Host "[update] 正在解压..." -ForegroundColor Cyan
+        if (-not $JsonOutput) {
+            Write-Host "[update] 正在解压..." -ForegroundColor Cyan
+        }
         Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
 
         $extractedRoot = Join-Path $tempDir "TermForge-main"
         if (-not (Test-Path $extractedRoot)) {
+            if ($JsonOutput) {
+                New-SccCommandEnvelope -Command "update" -Status "FAIL" -Errors @("解压失败：未找到预期目录结构") | ConvertTo-Json -Depth 4
+                return
+            }
             Write-Host "[update] 解压失败：未找到预期目录结构。" -ForegroundColor Red
             return
         }
@@ -911,12 +949,23 @@ function Invoke-SccUpdate {
         $remoteVersion = if (Test-Path $remoteVersionFile) { (Get-Content $remoteVersionFile -Raw).Trim() } else { "unknown" }
 
         if ($remoteVersion -eq $currentVersion) {
+            if ($JsonOutput) {
+                $payload = [pscustomobject][ordered]@{
+                    PreviousVersion = $currentVersion
+                    NewVersion      = $remoteVersion
+                    UpdatedFiles    = @()
+                }
+                New-SccCommandEnvelope -Command "update" -Status "PASS" -Payload $payload | ConvertTo-Json -Depth 4
+                return
+            }
             Write-Host "[update] 已经是最新版本 ($currentVersion)。" -ForegroundColor Green
             return
         }
 
-        Write-Host "[update] 发现新版本: $currentVersion -> $remoteVersion" -ForegroundColor Cyan
-        Write-Host "[update] 正在更新文件..." -ForegroundColor Cyan
+        if (-not $JsonOutput) {
+            Write-Host "[update] 发现新版本: $currentVersion -> $remoteVersion" -ForegroundColor Cyan
+            Write-Host "[update] 正在更新文件..." -ForegroundColor Cyan
+        }
 
         $sourceFiles = @(
             "setup.ps1", "bootstrap.ps1", "launcher.ps1", "verify.ps1",
@@ -925,6 +974,7 @@ function Invoke-SccUpdate {
             "powershell.config.json", "README.md", "DESIGN.md", "MODULE_GUIDE.md"
         )
 
+        $copiedFiles = @()
         $totalOps = $sourceFiles.Count + 2
         $opIndex = 0
         foreach ($file in $sourceFiles) {
@@ -933,9 +983,12 @@ function Invoke-SccUpdate {
             $dst = Join-Path $rootPath $file
             if (Test-Path $src) {
                 Copy-Item -Path $src -Destination $dst -Force
+                $copiedFiles += $file
             }
-            $pct = [Math]::Floor(($opIndex / $totalOps) * 100)
-            Write-Progress -Activity "Updating TermForge" -Status "Copying $file" -PercentComplete $pct -Id 0
+            if (-not $JsonOutput) {
+                $pct = [Math]::Floor(($opIndex / $totalOps) * 100)
+                Write-Progress -Activity "Updating TermForge" -Status "Copying $file" -PercentComplete $pct -Id 0
+            }
         }
 
         $modulesDir = Join-Path $extractedRoot "modules"
@@ -946,7 +999,10 @@ function Invoke-SccUpdate {
                 Remove-Item -Path $targetModules -Recurse -Force
             }
             Copy-Item -Path $modulesDir -Destination $targetModules -Recurse -Force
-            Write-Progress -Activity "Updating TermForge" -Status "Copying modules/" -PercentComplete ([Math]::Floor(($opIndex / $totalOps) * 100)) -Id 0
+            $copiedFiles += "modules/"
+            if (-not $JsonOutput) {
+                Write-Progress -Activity "Updating TermForge" -Status "Copying modules/" -PercentComplete ([Math]::Floor(($opIndex / $totalOps) * 100)) -Id 0
+            }
         }
 
         $srcDir = Join-Path $extractedRoot "src"
@@ -957,7 +1013,10 @@ function Invoke-SccUpdate {
                 Remove-Item -Path $targetSrc -Recurse -Force
             }
             Copy-Item -Path $srcDir -Destination $targetSrc -Recurse -Force
-            Write-Progress -Activity "Updating TermForge" -Status "Copying src/" -PercentComplete ([Math]::Floor(($opIndex / $totalOps) * 100)) -Id 0
+            $copiedFiles += "src/"
+            if (-not $JsonOutput) {
+                Write-Progress -Activity "Updating TermForge" -Status "Copying src/" -PercentComplete ([Math]::Floor(($opIndex / $totalOps) * 100)) -Id 0
+            }
         }
 
         $bundledTheme = Join-Path $extractedRoot "themes\termforge.omp.json"
@@ -967,6 +1026,7 @@ function Invoke-SccUpdate {
                 New-Item -Path $targetThemeDir -ItemType Directory -Force | Out-Null
             }
             Copy-Item -Path $bundledTheme -Destination (Join-Path $targetThemeDir "termforge.omp.json") -Force
+            $copiedFiles += "themes/termforge.omp.json"
         }
 
         if ($null -ne $config -and -not [string]::IsNullOrWhiteSpace($remoteVersion)) {
@@ -982,11 +1042,25 @@ function Invoke-SccUpdate {
             }
         }
 
+        if ($JsonOutput) {
+            $payload = [pscustomobject][ordered]@{
+                PreviousVersion = $currentVersion
+                NewVersion      = $remoteVersion
+                UpdatedFiles    = @($copiedFiles)
+            }
+            New-SccCommandEnvelope -Command "update" -Status "PASS" -Payload $payload | ConvertTo-Json -Depth 4
+            return
+        }
+
         Write-Progress -Activity "Updating TermForge" -Status "Complete" -PercentComplete 100 -Id 0 -Completed
         Write-Host ""
         Write-Host "[update] 更新完成: $currentVersion -> $remoteVersion" -ForegroundColor Green
         Write-Host "[update] 请重新加载终端以使用新版本（运行 '. `$PROFILE' 或重启终端）。" -ForegroundColor DarkGray
     } catch {
+        if ($JsonOutput) {
+            New-SccCommandEnvelope -Command "update" -Status "FAIL" -Errors @($_.Exception.Message) | ConvertTo-Json -Depth 4
+            return
+        }
         Write-Progress -Activity "Updating TermForge" -Status "Failed" -PercentComplete 100 -Id 0 -Completed
         Write-Host "[update] 更新失败: $($_.Exception.Message)" -ForegroundColor Red
     } finally {
@@ -996,6 +1070,27 @@ function Invoke-SccUpdate {
             Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+}
+
+function Get-SccModuleListPayload {
+    $state = Ensure-SccStateFile
+    $availableModules = Get-SccAvailableModuleNames
+    $modules = foreach ($moduleName in ($availableModules + $state.PSObject.Properties.Name) | Sort-Object -Unique) {
+        $exists = $availableModules -contains $moduleName
+        $isEnabled = $false
+        if ($state.PSObject.Properties.Match($moduleName).Count -gt 0) {
+            $isEnabled = [bool]$state.$moduleName
+        }
+
+        [pscustomobject][ordered]@{
+            Name    = $moduleName
+            Exists  = $exists
+            Enabled = $isEnabled
+            Status  = if (-not $exists) { "missing" } elseif ($isEnabled) { "enabled" } else { "disabled" }
+        }
+    }
+
+    return @($modules)
 }
 
 function Get-SccStatusReport {

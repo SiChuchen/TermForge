@@ -123,11 +123,28 @@ function Invoke-SccManagerCommand {
 
     $commandName = Get-SccPrimaryCommandName
 
+    # Check if --json is present in any argument position
+    $allArgs = @()
+    if (-not [string]::IsNullOrWhiteSpace($Module)) { $allArgs += $Module }
+    if ($Arguments.Count -gt 0) { $allArgs += $Arguments }
+    $wantJson = $allArgs -contains '--json'
+
     switch ($Action) {
         'help' {
             Show-SccHelpEntry -Name $Module
         }
         'list' {
+            if ($wantJson) {
+                try {
+                    $modules = Get-SccModuleListPayload
+                    $envelope = New-SccCommandEnvelope -Command "list" -Status "PASS" -Payload $modules
+                    $envelope | ConvertTo-Json -Depth 6
+                } catch {
+                    New-SccCommandEnvelope -Command "list" -Status "FAIL" -Errors @($_.Exception.Message) | ConvertTo-Json -Depth 4
+                }
+                return
+            }
+
             try {
                 Show-SccModuleList -State (Ensure-SccStateFile) -AvailableModules (Get-SccAvailableModuleNames)
             } catch {
@@ -136,15 +153,19 @@ function Invoke-SccManagerCommand {
         }
         'status' {
             $statusTail = @()
-            if (-not [string]::IsNullOrWhiteSpace($Module)) {
+            if (-not [string]::IsNullOrWhiteSpace($Module) -and $Module -ne '--json') {
                 $statusTail += $Module
             }
             if ($Arguments.Count -gt 0) {
                 $statusTail += $Arguments
             }
 
-            if ($statusTail -contains '--json') {
-                Invoke-SccDotNetCli status --json
+            if ($wantJson) {
+                try {
+                    Invoke-SccDotNetCli status --json
+                } catch {
+                    New-SccCommandEnvelope -Command "status" -Status "FAIL" -Errors @($_.Exception.Message) | ConvertTo-Json -Depth 4
+                }
                 return
             }
 
@@ -155,8 +176,8 @@ function Invoke-SccManagerCommand {
             }
         }
         'doctor' {
-            $doctorMode = if ([string]::IsNullOrWhiteSpace($Module)) {
-                "default"
+            $doctorMode = if ([string]::IsNullOrWhiteSpace($Module) -or $Module -eq '--json') {
+                if ($wantJson) { "json" } else { "default" }
             } else {
                 $Module.ToLowerInvariant()
             }
@@ -172,7 +193,11 @@ function Invoke-SccManagerCommand {
                     [void](Show-SccDoctor -Mode "fancy")
                 }
                 "json" {
-                    Invoke-SccDotNetCli doctor --json
+                    try {
+                        Invoke-SccDotNetCli doctor --json
+                    } catch {
+                        New-SccCommandEnvelope -Command "doctor" -Status "FAIL" -Errors @($_.Exception.Message) | ConvertTo-Json -Depth 4
+                    }
                 }
                 default {
                     Write-Host "[SCC] 不支持的 doctor 模式: $doctorMode。可选: default, fancy, verbose, json" -ForegroundColor Red
@@ -180,45 +205,97 @@ function Invoke-SccManagerCommand {
             }
         }
         'update' {
-            Invoke-SccUpdate
+            if ($wantJson) {
+                Invoke-SccUpdate -JsonOutput
+            } else {
+                Invoke-SccUpdate
+            }
         }
         'enable' {
             if (-not $Module) {
-                Write-Host "请指定模块名。" -ForegroundColor Red
+                if ($wantJson) {
+                    New-SccCommandEnvelope -Command "enable" -Status "FAIL" -Errors @("请指定模块名") | ConvertTo-Json -Depth 4
+                } else {
+                    Write-Host "请指定模块名。" -ForegroundColor Red
+                }
                 return
             }
 
             try {
                 Set-SccModuleState -ModuleName $Module -Enabled $true
-                Write-Host "模块 '$Module' 已启用。运行 '$commandName reload' 或 '. `$PROFILE`' 生效。" -ForegroundColor Green
+                if ($wantJson) {
+                    $payload = [pscustomobject][ordered]@{
+                        Module  = $Module
+                        Enabled = $true
+                    }
+                    New-SccCommandEnvelope -Command "enable" -Status "PASS" -Payload $payload | ConvertTo-Json -Depth 4
+                } else {
+                    Write-Host "模块 '$Module' 已启用。运行 '$commandName reload' 或 '. `$PROFILE`' 生效。" -ForegroundColor Green
+                }
             } catch {
-                Write-Host "[SCC] 启用失败: $($_.Exception.Message)" -ForegroundColor Red
+                if ($wantJson) {
+                    New-SccCommandEnvelope -Command "enable" -Status "FAIL" -Errors @($_.Exception.Message) | ConvertTo-Json -Depth 4
+                } else {
+                    Write-Host "[SCC] 启用失败: $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
         }
         'disable' {
             if (-not $Module) {
-                Write-Host "请指定模块名。" -ForegroundColor Red
+                if ($wantJson) {
+                    New-SccCommandEnvelope -Command "disable" -Status "FAIL" -Errors @("请指定模块名") | ConvertTo-Json -Depth 4
+                } else {
+                    Write-Host "请指定模块名。" -ForegroundColor Red
+                }
                 return
             }
 
             try {
                 Set-SccModuleState -ModuleName $Module -Enabled $false
-                Write-Host "模块 '$Module' 已禁用。运行 '$commandName reload' 或 '. `$PROFILE`' 生效。" -ForegroundColor Yellow
+                if ($wantJson) {
+                    $payload = [pscustomobject][ordered]@{
+                        Module  = $Module
+                        Enabled = $false
+                    }
+                    New-SccCommandEnvelope -Command "disable" -Status "PASS" -Payload $payload | ConvertTo-Json -Depth 4
+                } else {
+                    Write-Host "模块 '$Module' 已禁用。运行 '$commandName reload' 或 '. `$PROFILE`' 生效。" -ForegroundColor Yellow
+                }
             } catch {
-                Write-Host "[SCC] 禁用失败: $($_.Exception.Message)" -ForegroundColor Red
+                if ($wantJson) {
+                    New-SccCommandEnvelope -Command "disable" -Status "FAIL" -Errors @($_.Exception.Message) | ConvertTo-Json -Depth 4
+                } else {
+                    Write-Host "[SCC] 禁用失败: $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
         }
         'reload' {
             if (-not (Test-Path $PROFILE)) {
-                Write-Host "[SCC] 当前 PROFILE 不存在: $PROFILE" -ForegroundColor Red
+                if ($wantJson) {
+                    New-SccCommandEnvelope -Command "reload" -Status "FAIL" -Errors @("当前 PROFILE 不存在: $PROFILE") | ConvertTo-Json -Depth 4
+                } else {
+                    Write-Host "[SCC] 当前 PROFILE 不存在: $PROFILE" -ForegroundColor Red
+                }
                 return
             }
 
             try {
                 . $PROFILE
-                Write-Host "已重新加载: $PROFILE" -ForegroundColor Green
+                if ($wantJson) {
+                    $payload = [pscustomobject][ordered]@{
+                        ProfilePath = $PROFILE
+                        Reloaded    = $true
+                    }
+                    New-SccCommandEnvelope -Command "reload" -Status "PASS" -Payload $payload | ConvertTo-Json -Depth 4
+                } else {
+                    Write-Host "已重新加载: $PROFILE" -ForegroundColor Green
+                }
             } catch {
-                Write-Host "[SCC] 重新加载失败: $($_.Exception.Message)" -ForegroundColor Red
+                if ($wantJson) {
+                    New-SccCommandEnvelope -Command "reload" -Status "FAIL" -Errors @($_.Exception.Message) | ConvertTo-Json -Depth 4
+                } else {
+                    Write-Host "[SCC] 重新加载失败: $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
         }
     }
