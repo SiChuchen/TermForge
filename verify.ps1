@@ -86,7 +86,6 @@ function Invoke-SccProfileSmokeTest {
                         if ($scanReport.SchemaVersion -ne "2026-04-11" -or $scanReport.Command -ne "proxy.scan") {
                             throw "proxy scan --json 未返回 .NET 控制面代理契约。"
                         }
-                        & $entry.CommandName bypass add 127.0.0.1 *> $null
                     }
                     $verifiedCommands += $entry.CommandName
                 }

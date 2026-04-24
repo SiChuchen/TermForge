@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$InstallRoot = $(
         if (Test-Path (Join-Path $env:LOCALAPPDATA "TermForge")) {
@@ -13,16 +13,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$script:ManagedBlockMarkers = @(
-    [pscustomobject]@{
-        Start = "# >>> TermForge managed >>>"
-        End   = "# <<< TermForge managed <<<"
-    }
-    [pscustomobject]@{
-        Start = "# >>> windows-terminal managed >>>"
-        End   = "# <<< windows-terminal managed <<<"
-    }
-)
+
+$installHelpersPath = Join-Path $PSScriptRoot "modules\install-helpers.ps1"
+if (Test-Path $installHelpersPath) {
+    . $installHelpersPath
+} else {
+    throw "未找到 install-helpers.ps1: $installHelpersPath"
+}
 
 function Write-SccUninstallStep {
     param([Parameter(Mandatory)][string]$Message)
@@ -53,22 +50,6 @@ function Read-SccUninstallBool {
     }
 }
 
-function Remove-SccManagedBlock {
-    param([string]$Content)
-
-    if ([string]::IsNullOrWhiteSpace($Content)) {
-        return ""
-    }
-
-    $result = $Content
-    foreach ($marker in $script:ManagedBlockMarkers) {
-        $pattern = "(?ms)^\Q$($marker.Start)\E.*?^\Q$($marker.End)\E\r?\n?"
-        $result = [regex]::Replace($result, $pattern, "")
-    }
-
-    return $result.TrimEnd("`r", "`n")
-}
-
 function Remove-SccManagedProfileBlock {
     param([Parameter(Mandatory)][string]$ProfilePath)
 
@@ -79,30 +60,6 @@ function Remove-SccManagedProfileBlock {
     $existingContent = Get-Content -Path $ProfilePath -Raw
     $cleanContent = Remove-SccManagedBlock -Content $existingContent
     Set-Content -Path $ProfilePath -Value $cleanContent -Encoding UTF8
-}
-
-function Find-SccClinkExecutable {
-    $clinkCommand = Get-Command clink -ErrorAction SilentlyContinue
-    if ($null -ne $clinkCommand) {
-        return $clinkCommand.Source
-    }
-
-    $searchRoots = @(
-        (Join-Path $env:LOCALAPPDATA "Programs")
-        $env:ProgramFiles
-        ${env:ProgramFiles(x86)}
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path $_) }
-
-    foreach ($root in $searchRoots) {
-        $candidate = Get-ChildItem -Path $root -Recurse -Filter clink*.exe -ErrorAction SilentlyContinue |
-            Sort-Object FullName |
-            Select-Object -First 1
-        if ($null -ne $candidate) {
-            return $candidate.FullName
-        }
-    }
-
-    return $null
 }
 
 function Remove-SccUserPathEntry {

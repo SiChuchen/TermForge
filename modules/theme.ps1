@@ -198,6 +198,14 @@ function Import-SccRemoteTheme {
         Invoke-WebRequest @params
 
         if (Test-Path $localPath) {
+            # Validate the downloaded content is valid JSON (not a 404 HTML page)
+            try {
+                $null = Get-Content -Path $localPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            } catch {
+                Remove-Item -Path $localPath -Force -ErrorAction SilentlyContinue
+                Write-Host "[Theme] 下载内容不是有效的 JSON: $ThemeName" -ForegroundColor Red
+                return $null
+            }
             Write-Host "[Theme] 已自动下载主题: $ThemeName" -ForegroundColor DarkGray
             return $localPath
         }
@@ -415,10 +423,13 @@ function Invoke-SccThemeActivation {
         }
 
         if ($cacheHit) {
+            $env:POSH_SESSION_ID = [guid]::NewGuid().ToString()
             . $cacheFile
         } else {
             $initOutput = & $themeExecutable init pwsh --config $themePath 2>$null
-            $initOutput | Set-Content -Path $cacheFile -Encoding UTF8
+            # Strip the fixed POSH_SESSION_ID line so we regenerate it on cache hit
+            $sanitized = ($initOutput -split "`n" | Where-Object { $_ -notmatch '^\$env:POSH_SESSION_ID\s*=' }) -join "`n"
+            $sanitized | Set-Content -Path $cacheFile -Encoding UTF8
             $fingerprint | Set-Content -Path $fingerprintFile -Encoding UTF8
             Invoke-Expression $initOutput
         }

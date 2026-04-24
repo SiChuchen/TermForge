@@ -28,16 +28,19 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$script:ManagedBlockMarkers = @(
-    [pscustomobject]@{
-        Start = "# >>> TermForge managed >>>"
-        End   = "# <<< TermForge managed <<<"
-    }
-    [pscustomobject]@{
-        Start = "# >>> windows-terminal managed >>>"
-        End   = "# <<< windows-terminal managed <<<"
-    }
-)
+
+$installHelpersPath = Join-Path $PSScriptRoot "modules\install-helpers.ps1"
+if (Test-Path $installHelpersPath) {
+    . $installHelpersPath
+} else {
+    # Fallback: inline minimal definitions if module file is missing
+    $script:ManagedBlockMarkers = @(
+        [pscustomobject]@{ Start = "# >>> TermForge managed >>>"; End = "# <<< TermForge managed <<<" }
+        [pscustomobject]@{ Start = "# >>> windows-terminal managed >>>"; End = "# <<< windows-terminal managed <<<" }
+    )
+    function Remove-SccManagedBlock { param([string]$Content) return $Content }
+    function Find-SccClinkExecutable { return $null }
+}
 $script:ManagedBlockStart = $script:ManagedBlockMarkers[0].Start
 $script:ManagedBlockEnd = $script:ManagedBlockMarkers[0].End
 
@@ -430,30 +433,6 @@ function Ensure-SccRequiredDependency {
     throw "缺少必需依赖 $FriendlyName，安装无法继续。$reasonText"
 }
 
-function Find-SccClinkExecutable {
-    $clinkCommand = Get-Command clink -ErrorAction SilentlyContinue
-    if ($null -ne $clinkCommand) {
-        return $clinkCommand.Source
-    }
-
-    $searchRoots = @(
-        (Join-Path $env:LOCALAPPDATA "Programs")
-        $env:ProgramFiles
-        ${env:ProgramFiles(x86)}
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path $_) }
-
-    foreach ($root in $searchRoots) {
-        $candidate = Get-ChildItem -Path $root -Recurse -Filter clink*.exe -ErrorAction SilentlyContinue |
-            Sort-Object FullName |
-            Select-Object -First 1
-        if ($null -ne $candidate) {
-            return $candidate.FullName
-        }
-    }
-
-    return $null
-}
-
 function Get-SccOhMyPoshExecutable {
     return (Get-SccCommandSource -CommandName "oh-my-posh")
 }
@@ -477,23 +456,6 @@ function Copy-SccRuntimeFile {
     }
 
     Copy-Item -Path $sourcePath -Destination $targetPath -Force
-}
-
-function Remove-SccManagedBlock {
-    param([string]$Content)
-
-    if ([string]::IsNullOrWhiteSpace($Content)) {
-        return ""
-    }
-
-    $result = $Content
-    foreach ($marker in $script:ManagedBlockMarkers) {
-        $escapedStart = [regex]::Escape($marker.Start)
-        $escapedEnd = [regex]::Escape($marker.End)
-        $pattern = "(?ms)^$escapedStart.*?^$escapedEnd\r?\n?"
-        $result = [regex]::Replace($result, $pattern, "")
-    }
-    return $result.TrimEnd("`r", "`n")
 }
 
 function Get-SccManagedProfileBlock {
@@ -708,13 +670,24 @@ function Export-SccTheme {
     $ohMyPoshExecutable = Get-SccOhMyPoshExecutable
     if (-not [string]::IsNullOrWhiteSpace($ohMyPoshExecutable)) {
         try {
-            & $ohMyPoshExecutable config export --config $ThemeName --output $targetThemePath
+            $remoteUrl = "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/$ThemeName.omp.json"
+            $previousProtocol = [Net.ServicePointManager]::SecurityProtocol
+            $previousProgress = $ProgressPreference
+            try {
+                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                $ProgressPreference = 'SilentlyContinue'
+                Invoke-WebRequest -Uri $remoteUrl -OutFile $targetThemePath -UseBasicParsing -TimeoutSec 30
+            } finally {
+                [Net.ServicePointManager]::SecurityProtocol = $previousProtocol
+                $ProgressPreference = $previousProgress
+            }
             if (Test-Path $targetThemePath) {
                 Copy-Item -Path $targetThemePath -Destination $activeThemePath -Force
+                Write-SccInstallStep "已从远程下载主题: $ThemeName"
                 return $ThemeName
             }
         } catch {
-            Write-SccInstallWarn "导出主题 '$ThemeName' 失败，将回退到 termforge。"
+            Write-SccInstallWarn "下载主题 '$ThemeName' 失败，将回退到 termforge。"
         }
     }
 

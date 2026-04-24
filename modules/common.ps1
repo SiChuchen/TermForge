@@ -1129,7 +1129,7 @@ function Get-SccModuleScriptPaths {
     }
 
     return @(Get-ChildItem -Path $modulesPath -Filter *.ps1 -File |
-        Where-Object { $_.Name -notin @("common.ps1", "manager.ps1") } |
+        Where-Object { $_.Name -notin @("common.ps1", "manager.ps1", "install-helpers.ps1") } |
         Sort-Object Name)
 }
 
