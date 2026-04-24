@@ -1,6 +1,11 @@
 ---
 name: termforge
-description: Install, configure, diagnose, and manage TermForge — a managed Windows shell runtime for PowerShell/CMD profiles.
+description: |
+  Use when the user mentions TermForge, terminal runtime, PowerShell profile management, terminal proxy configuration,
+  terminal theme/Oh My Posh, terminal diagnostics, or wants to install/configure/diagnose their Windows terminal setup.
+  Triggers on: termforge, wtctl, terminal profile, terminal proxy, terminal theme, oh-my-posh, PowerShell profile,
+  CMD/Clink, Nerd Font, terminal doctor, terminal update, proxy plan/apply/rollback.
+  Also triggers when the user asks about managing Windows shell environment, terminal font, or terminal module state.
 version: 0.9.0
 ---
 
@@ -80,7 +85,7 @@ Every `--json` response follows this structure:
 
 ## Installation
 
-Run from the TermForge source directory.
+Run from the TermForge source directory (`E:\codex-prj\TermForge`).
 
 ```bash
 # Non-interactive install with sensible defaults (recommended for agents)
@@ -118,25 +123,25 @@ Non-interactive output is a `CommandEnvelope` JSON with `Command: "install"` and
 
 **All install parameters:**
 
-| Parameter                | Type     | Default                          | Description                              |
-|--------------------------|----------|----------------------------------|------------------------------------------|
-| `-InstallRoot`           | string   | `$env:LOCALAPPDATA\TermForge`    | Installation target directory            |
-| `-CommandName`           | string   | `termforge`                      | Primary CLI command name                 |
-| `-AddToPath`             | switch   | false                            | Add install root to user PATH            |
-| `-ManagePowerShellProfile` | switch | false                            | Inject into PowerShell profile           |
-| `-ManageVsCodeProfile`   | switch   | false                            | Inject into VS Code PowerShell profile   |
-| `-EnableCmdHost`         | switch   | false                            | Enable CMD host with Clink               |
-| `-ConfigureProxy`        | switch   | false                            | Enable proxy configuration               |
-| `-HttpProxy`             | string   | `""`                             | HTTP proxy URL                           |
-| `-HttpsProxy`            | string   | `""`                             | HTTPS proxy URL (falls back to HTTP)     |
-| `-NoProxy`               | string   | `127.0.0.1,localhost,::1`        | Comma-separated bypass hosts             |
-| `-ThemeName`             | string   | `termforge`                      | Default Oh My Posh theme name            |
-| `-FontFace`              | string   | `MesloLGM Nerd Font`             | Nerd Font face name                      |
-| `-FontSize`              | int      | `12`                             | Font size                                |
-| `-ConfigureFonts`        | switch   | false                            | Auto-install Nerd Font                   |
-| `-SkipDependencyInstall` | switch   | false                            | Don't auto-install missing tools         |
-| `-SkipVerification`      | switch   | false                            | Skip post-install smoke test             |
-| `-NonInteractive`        | switch   | false                            | Use all defaults / provided params       |
+| Parameter                  | Type   | Default                       | Description                              |
+|----------------------------|--------|-------------------------------|------------------------------------------|
+| `-InstallRoot`             | string | `$env:LOCALAPPDATA\TermForge` | Installation target directory            |
+| `-CommandName`             | string | `termforge`                   | Primary CLI command name                 |
+| `-AddToPath`               | switch | false                         | Add install root to user PATH            |
+| `-ManagePowerShellProfile` | switch | false                         | Inject into PowerShell profile           |
+| `-ManageVsCodeProfile`     | switch | false                         | Inject into VS Code PowerShell profile   |
+| `-EnableCmdHost`           | switch | false                         | Enable CMD host with Clink               |
+| `-ConfigureProxy`          | switch | false                         | Enable proxy configuration               |
+| `-HttpProxy`               | string | `""`                          | HTTP proxy URL                           |
+| `-HttpsProxy`              | string | `""`                          | HTTPS proxy URL (falls back to HTTP)     |
+| `-NoProxy`                 | string | `127.0.0.1,localhost,::1`     | Comma-separated bypass hosts             |
+| `-ThemeName`               | string | `termforge`                   | Default Oh My Posh theme name            |
+| `-FontFace`                | string | `MesloLGM Nerd Font`          | Nerd Font face name                      |
+| `-FontSize`                | int    | `12`                          | Font size                                |
+| `-ConfigureFonts`          | switch | false                         | Auto-install Nerd Font                   |
+| `-SkipDependencyInstall`   | switch | false                         | Don't auto-install missing tools         |
+| `-SkipVerification`        | switch | false                         | Skip post-install smoke test             |
+| `-NonInteractive`          | switch | false                         | Use all defaults / provided params       |
 
 ---
 
@@ -232,11 +237,18 @@ proxy bypass add 192.168.1.0/24 internal.corp  # add NO_PROXY entries
 ## Theme Module
 
 ```bash
-posh          # view current theme
-poshl         # list installed themes
-posht <name>  # preview (current session only)
-poshs <name>  # save permanently
+posh                    # view current theme status
+poshl                   # list locally installed themes
+poshl --available       # list all 124+ oh-my-posh themes from GitHub (24h cache)
+posht <name>            # preview theme (auto-downloads from GitHub if not local)
+poshs <name>            # save theme permanently (auto-downloads from GitHub if not local)
 ```
+
+Themes are hosted at: `https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/<name>.omp.json`
+
+When `posht` or `poshs` is called with a theme not in the local themes directory, TermForge automatically downloads it from the oh-my-posh GitHub repository. Uses configured proxy if proxy is enabled.
+
+`poshl --available` fetches the full theme name list from the GitHub API with a 24-hour local cache. Falls back to stale cache on network failure.
 
 ---
 
@@ -245,23 +257,23 @@ poshs <name>  # save permanently
 ### Recipe 1: Fresh Install + Verify
 ```
 1. pwsh -NoProfile -File install.ps1 -NonInteractive -ManagePowerShellProfile -AddToPath -SkipVerification
-2. Parse JSON → check Status == "PASS"
+2. Parse JSON -> check Status == "PASS"
 3. pwsh -NoProfile -Command ". (Join-Path $env:LOCALAPPDATA 'TermForge\Microsoft.PowerShell_profile.ps1'); termforge doctor --json"
-4. Parse JSON → check Payload.OverallStatus != "FAIL"
+4. Parse JSON -> check Payload.OverallStatus != "FAIL"
 ```
 
 ### Recipe 2: Check and Update
 ```
 1. pwsh -NoProfile -Command ". (Join-Path $env:LOCALAPPDATA 'TermForge\Microsoft.PowerShell_profile.ps1'); termforge update --json"
-2. Parse JSON → if UpdatedFiles is non-empty, update happened
+2. Parse JSON -> if UpdatedFiles is non-empty, update happened
 3. If updated: termforge reload --json
 ```
 
 ### Recipe 3: Configure Proxy
 ```
-1. proxy scan --json → read current state
-2. proxy plan --mode enable --targets env --http <url> --json → get plan-id
-3. proxy apply --plan-id <id> --json → apply
+1. proxy scan --json -> read current state
+2. proxy plan --mode enable --targets env --http <url> --json -> get plan-id
+3. proxy apply --plan-id <id> --json -> apply
 4. On failure: proxy rollback --change-id <id> --json
 ```
 
@@ -269,7 +281,7 @@ poshs <name>  # save permanently
 ```
 1. termforge doctor --json
 2. Check Payload.OverallStatus
-3. Iterate Payload.Results → find entries with Status != "PASS"
+3. Iterate Payload.Results -> find entries with Status != "PASS"
 4. Fix issues based on Name and Message fields
 5. Re-run doctor to confirm
 ```
@@ -278,12 +290,12 @@ poshs <name>  # save permanently
 
 ## Configuration Files
 
-| File                     | Purpose                          | Preserved on update |
-|--------------------------|----------------------------------|--------------------|
-| `scc.config.json`        | Runtime config                   | Yes (version updated) |
-| `module_state.json`      | Module enable/disable flags      | Yes                |
-| `state/`                 | Plan store, operation ledger     | Yes                |
-| `themes/active.omp.json` | Active theme override            | Yes                |
+| File                     | Purpose                          | Preserved on update       |
+|--------------------------|----------------------------------|--------------------------|
+| `scc.config.json`        | Runtime config                   | Yes (version updated)    |
+| `module_state.json`      | Module enable/disable flags      | Yes                      |
+| `state/`                 | Plan store, operation ledger     | Yes                      |
+| `themes/active.omp.json` | Active theme override            | Yes                      |
 
 ## Important Notes
 
@@ -307,3 +319,11 @@ An agent **MUST** verify these conditions before attempting to use TermForge com
 | **`oh-my-posh` installed** (required dependency) | Theme engine is mandatory for TermForge to function | Installer auto-installs via winget; use `-SkipDependencyInstall` only if pre-installed |
 
 **Key limitation:** TermForge commands are PowerShell functions, not standalone executables. They only exist after `bootstrap.ps1` loads into the session. An agent **cannot** simply run `termforge list --json` in a bare shell — it must first load the TermForge profile entry point. See "Step 1: Choose Invocation Method" above for the correct calling pattern.
+
+## Current Installation
+
+- **Install root**: `C:\Users\SiChuchen\AppData\Local\TermForge`
+- **Source repo**: `E:\codex-prj\TermForge`
+- **Primary command**: `termforge`
+- **Fallback command**: `wtctl`
+- **Proxy**: `http://127.0.0.1:11809`

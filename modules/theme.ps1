@@ -4,11 +4,11 @@ if (Test-Path $commonPath) {
 }
 
 Initialize-SccHelpRegistry
-Register-SccHelp -ModuleName "theme" -HelpText "posh  - 查看主题模块状态`nposhl - 列出当前已安装主题`nposht <名称> - 临时测试主题`nposhs <名称> - 永久保存并应用主题"
+Register-SccHelp -ModuleName "theme" -HelpText "posh  - 查看主题模块状态`nposhl - 列出当前已安装主题`nposhl --available - 列出 oh-my-posh 远程可用主题`nposht <名称> - 临时测试主题（本地没有会自动下载）`nposhs <名称> - 永久保存并应用主题（本地没有会自动下载）"
 Register-SccCommandHelp -CommandName "posh" -ModuleName "theme" -HelpText "用法: posh [-Help]`n作用: 显示当前主题、主题目录、启用状态和配置文件位置。"
-Register-SccCommandHelp -CommandName "poshl" -ModuleName "theme" -HelpText "用法: poshl [-Help]`n作用: 列出主题目录中的所有 `.omp.json` 主题名称。"
-Register-SccCommandHelp -CommandName "posht" -ModuleName "theme" -HelpText "用法: posht <名称> [-Help]`n作用: 临时切换主题，只对当前会话生效，不写入配置文件。"
-Register-SccCommandHelp -CommandName "poshs" -ModuleName "theme" -HelpText "用法: poshs <名称> [-Help]`n作用: 永久切换主题，并把结果写回 scc.config.json。"
+Register-SccCommandHelp -CommandName "poshl" -ModuleName "theme" -HelpText "用法: poshl [-Help] [--available]`n作用: 列出主题目录中的所有 `.omp.json` 主题名称。`n       --available 列出 oh-my-posh 远程仓库中的全部可用主题名称。"
+Register-SccCommandHelp -CommandName "posht" -ModuleName "theme" -HelpText "用法: posht <名称> [-Help]`n作用: 临时切换主题，只对当前会话生效，不写入配置文件。本地没有的主题会自动从远程下载。"
+Register-SccCommandHelp -CommandName "poshs" -ModuleName "theme" -HelpText "用法: poshs <名称> [-Help]`n作用: 永久切换主题，并把结果写回 scc.config.json。本地没有的主题会自动从远程下载。"
 
 $config = Get-SccConfig
 $script:ThemeEnabled = [bool]$config.theme.enabled
@@ -87,6 +87,130 @@ function Get-SccThemeFilePath {
 
 function Get-SccThemeActiveFilePath {
     return (Join-Path $script:ThemeDir "active.omp.json")
+}
+
+function Get-SccRemoteThemeList {
+    $cacheFile = Join-Path $script:ThemeDir ".remote-themes-cache.json"
+    $cacheTtl = [TimeSpan]::FromHours(24)
+
+    if ((Test-Path $cacheFile)) {
+        try {
+            $cacheAge = (Get-Date) - (Get-Item $cacheFile).LastWriteTime
+            if ($cacheAge -lt $cacheTtl) {
+                $cached = Get-Content -Path $cacheFile -Raw | ConvertFrom-Json
+                if ($cached -is [array] -and $cached.Count -gt 0) {
+                    return @($cached)
+                }
+            }
+        } catch {
+            # Cache corrupt, re-fetch
+        }
+    }
+
+    $apiUrl = "https://api.github.com/repos/JanDeDobbeleer/oh-my-posh/contents/themes"
+    $previousProtocol = [Net.ServicePointManager]::SecurityProtocol
+    $previousProgress = $ProgressPreference
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $ProgressPreference = 'SilentlyContinue'
+
+        $proxyUrl = ""
+        $config = Get-SccConfig
+        if ($config.proxy -and [bool]$config.proxy.enabled) {
+            $proxyUrl = if (-not [string]::IsNullOrWhiteSpace($config.proxy.https)) { $config.proxy.https } elseif (-not [string]::IsNullOrWhiteSpace($config.proxy.http)) { $config.proxy.http } else { "" }
+        }
+
+        $params = @{
+            Uri             = $apiUrl
+            UseBasicParsing = $true
+            TimeoutSec      = 30
+            Headers         = @{ "Accept" = "application/vnd.github.v3+json" }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($proxyUrl)) {
+            $params.Proxy = $proxyUrl
+            $params.ProxyUseDefaultCredentials = $true
+        }
+
+        $response = Invoke-RestMethod @params
+        $themeNames = @($response | Where-Object { $_.name -match '\.omp\.(json|yaml)$' } | ForEach-Object { $_.name -replace '\.omp\.(json|yaml)$', '' } | Sort-Object)
+
+        if ($themeNames.Count -gt 0) {
+            Ensure-SccThemeDirectory | Out-Null
+            $themeNames | ConvertTo-Json | Set-Content -Path $cacheFile -Encoding UTF8
+        }
+
+        return $themeNames
+    } catch {
+        # Network failed, return stale cache if available
+        if ((Test-Path $cacheFile)) {
+            try {
+                $cached = Get-Content -Path $cacheFile -Raw | ConvertFrom-Json
+                if ($cached -is [array]) {
+                    Write-Host "[Theme] 远程获取失败，使用本地缓存。" -ForegroundColor Yellow
+                    return @($cached)
+                }
+            } catch { }
+        }
+        Write-Host "[Theme] 无法获取远程主题列表: $($_.Exception.Message)" -ForegroundColor Red
+        return @()
+    } finally {
+        [Net.ServicePointManager]::SecurityProtocol = $previousProtocol
+        $ProgressPreference = $previousProgress
+    }
+}
+
+function Import-SccRemoteTheme {
+    param([Parameter(Mandatory)][string]$ThemeName)
+
+    $localPath = Join-Path $script:ThemeDir "$ThemeName.omp.json"
+    if (Test-Path $localPath) {
+        return $localPath
+    }
+
+    if (-not (Ensure-SccThemeDirectory)) {
+        return $null
+    }
+
+    $remoteUrl = "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/$ThemeName.omp.json"
+    $previousProtocol = [Net.ServicePointManager]::SecurityProtocol
+    $previousProgress = $ProgressPreference
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $ProgressPreference = 'SilentlyContinue'
+
+        $proxyUrl = ""
+        $config = Get-SccConfig
+        if ($config.proxy -and [bool]$config.proxy.enabled) {
+            $proxyUrl = if (-not [string]::IsNullOrWhiteSpace($config.proxy.https)) { $config.proxy.https } elseif (-not [string]::IsNullOrWhiteSpace($config.proxy.http)) { $config.proxy.http } else { "" }
+        }
+
+        $params = @{
+            Uri             = $remoteUrl
+            OutFile         = $localPath
+            UseBasicParsing = $true
+            TimeoutSec      = 30
+        }
+        if (-not [string]::IsNullOrWhiteSpace($proxyUrl)) {
+            $params.Proxy = $proxyUrl
+            $params.ProxyUseDefaultCredentials = $true
+        }
+
+        Invoke-WebRequest @params
+
+        if (Test-Path $localPath) {
+            Write-Host "[Theme] 已自动下载主题: $ThemeName" -ForegroundColor DarkGray
+            return $localPath
+        }
+
+        Write-Host "[Theme] 下载主题失败: $ThemeName" -ForegroundColor Red
+        return $null
+    } catch {
+        Write-Host "[Theme] 下载主题失败: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    } finally {
+        [Net.ServicePointManager]::SecurityProtocol = $previousProtocol
+        $ProgressPreference = $previousProgress
+    }
 }
 
 function Get-SccThemeCommand {
@@ -227,12 +351,16 @@ function Invoke-SccThemeActivation {
 
     $themePath = Get-SccThemeFilePath -ThemeName $ThemeName
     if (-not (Test-Path $themePath)) {
-        $script:ThemeStatus = "主题文件不存在: $themePath"
-        $script:ThemeLastError = $null
-        if (-not $Quiet) {
-            Write-Host "[Theme] $script:ThemeStatus" -ForegroundColor Yellow
+        $importedPath = Import-SccRemoteTheme -ThemeName $ThemeName
+        if ($null -eq $importedPath) {
+            $script:ThemeStatus = "主题文件不存在且下载失败: $ThemeName"
+            $script:ThemeLastError = $null
+            if (-not $Quiet) {
+                Write-Host "[Theme] $script:ThemeStatus" -ForegroundColor Yellow
+            }
+            return $false
         }
-        return $false
+        $themePath = $importedPath
     }
 
     $themeExecutable = Get-SccThemeExecutable
@@ -357,11 +485,23 @@ function poshs {
 function poshl {
     param(
         [string]$Action,
-        [switch]$Help
+        [switch]$Help,
+        [switch]$Available
     )
 
     if ($Help -or $Action -eq "help") {
         [void](Show-SccCommandHelp -CommandName "poshl")
+        return
+    }
+
+    if ($Available -or $Action -eq "--available") {
+        $remoteThemes = Get-SccRemoteThemeList
+        if ($remoteThemes.Count -eq 0) {
+            return
+        }
+        foreach ($name in $remoteThemes) {
+            Write-Output $name
+        }
         return
     }
 
