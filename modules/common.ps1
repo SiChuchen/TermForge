@@ -457,7 +457,27 @@ function Write-SccJsonFile {
         [Parameter(Mandatory)]$Value
     )
 
-    $Value | ConvertTo-Json -Depth 8 | Set-Content -Path $Path -Encoding UTF8
+    $jsonContent = $Value | ConvertTo-Json -Depth 8
+    $directory = [System.IO.Path]::GetDirectoryName($Path)
+    if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path $directory)) {
+        New-Item -Path $directory -ItemType Directory -Force | Out-Null
+    }
+
+    $tempPath = [System.IO.Path]::Combine(
+        $directory,
+        [System.IO.Path]::GetRandomFileName()
+    )
+
+    try {
+        Set-Content -Path $tempPath -Value $jsonContent -Encoding UTF8
+        # Atomic replace on NTFS (same volume rename is atomic)
+        [System.IO.File]::Move($tempPath, $Path, $true)
+    } catch {
+        if (Test-Path $tempPath) {
+            Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
+        }
+        throw
+    }
 }
 
 function Get-SccConfig {
