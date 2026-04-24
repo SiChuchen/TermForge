@@ -286,6 +286,23 @@ When `posht` or `poshs` is called with a theme not in the local themes directory
 5. Re-run doctor to confirm
 ```
 
+### Recipe 5: Theme Selection (Web-based)
+
+When the user wants to change their terminal theme, the agent should guide them to the official oh-my-posh theme gallery to browse and pick visually. Do NOT generate local PNG previews.
+
+**Agent message template (use the user's language):**
+```
+请访问 https://ohmyposh.dev/docs/themes 浏览全部主题，选好后将主题名称告诉我，我来帮你更换。
+```
+
+**Workflow:**
+```
+1. Agent sends the link and instruction message above to the user
+2. User browses the gallery, picks a theme, and replies with the theme name
+3. Agent runs: poshs <name>   (auto-downloads from GitHub if not locally available)
+4. Theme is applied — user can open a new terminal to see the result
+```
+
 ---
 
 ## Configuration Files
