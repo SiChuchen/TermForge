@@ -213,10 +213,19 @@ function Get-SccDefaultConfig {
 function Test-SccPropertyObject {
     param($Value)
 
-    return $null -ne $Value -and (
-        $Value -is [pscustomobject] -or
-        $Value -is [System.Collections.IDictionary]
+    if ($null -eq $Value) {
+        return $false
+    }
+
+    if ($Value -is [string] -or $Value -is [System.ValueType] -or $Value -is [System.Array]) {
+        return $false
+    }
+
+    $isPropertyObject = (
+        ($Value -is [pscustomobject]) -or
+        ($Value -is [System.Collections.IDictionary])
     )
+    return $isPropertyObject
 }
 
 function ConvertTo-SccObject {

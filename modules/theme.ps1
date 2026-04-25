@@ -337,6 +337,15 @@ function Save-SccSelectedThemeName {
 function Get-SccInitCacheFingerprint {
     param([Parameter(Mandatory)][string]$ThemePath, [string]$OmpExecutable)
 
+    $themeIdentity = ""
+    if (-not [string]::IsNullOrWhiteSpace($ThemePath)) {
+        try {
+            $themeIdentity = [System.IO.Path]::GetFullPath($ThemePath)
+        } catch {
+            $themeIdentity = $ThemePath
+        }
+    }
+
     $themeMtime = ""
     if (Test-Path $ThemePath) {
         $themeMtime = (Get-Item $ThemePath).LastWriteTimeUtc.Ticks.ToString()
@@ -350,11 +359,175 @@ function Get-SccInitCacheFingerprint {
         }
     }
 
-    return "$themeMtime|$ompMtime"
+    return "$themeIdentity|$themeMtime|$ompMtime"
 }
 
 function Get-SccInitCachePath {
     return (Join-Path $script:ThemeDir ".init-cache.ps1")
+}
+
+function Get-SccInitSessionCacheBackupPath {
+    return (Join-Path $script:ThemeDir ".init-cache.omp.cache")
+}
+
+function Get-SccPoshSessionIdFromInitContent {
+    param([AllowEmptyString()][string]$Content)
+
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return ""
+    }
+
+    $match = [regex]::Match($Content, '\$env:POSH_SESSION_ID\s*=\s*["'']([^"'']+)["'']')
+    if (-not $match.Success) {
+        return ""
+    }
+
+    return $match.Groups[1].Value
+}
+
+function Get-SccOhMyPoshCacheDirectory {
+    $homePath = if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        $env:USERPROFILE
+    } elseif (-not [string]::IsNullOrWhiteSpace($HOME)) {
+        $HOME
+    } else {
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+    }
+
+    return (Join-Path $homePath ".cache\oh-my-posh")
+}
+
+function Get-SccOhMyPoshSessionCachePath {
+    param([Parameter(Mandatory)][string]$SessionId)
+
+    return (Join-Path (Get-SccOhMyPoshCacheDirectory) "pwsh.$SessionId.omp.cache")
+}
+
+function Test-SccInitScriptUsable {
+    param([AllowEmptyString()][string]$Content)
+
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return $false
+    }
+
+    $hasSessionId = $Content -match '\$env:POSH_SESSION_ID\s*='
+    $hasInitScript = $Content -match 'oh-my-posh[\\/]+init'
+    $hasLegacyPromptHook = $Content -match '\bSet-PoshPrompt\b'
+
+    return (($hasSessionId -and $hasInitScript) -or $hasLegacyPromptHook)
+}
+
+function Restore-SccInitSessionCache {
+    param(
+        [Parameter(Mandatory)][string]$InitContent,
+        [Parameter(Mandatory)][string]$BackupPath
+    )
+
+    $sessionId = Get-SccPoshSessionIdFromInitContent -Content $InitContent
+    if ([string]::IsNullOrWhiteSpace($sessionId) -or -not (Test-Path $BackupPath)) {
+        return $false
+    }
+
+    $sessionCachePath = Get-SccOhMyPoshSessionCachePath -SessionId $sessionId
+    $sessionCacheDirectory = Split-Path -Parent $sessionCachePath
+    if (-not (Test-Path $sessionCacheDirectory)) {
+        New-Item -Path $sessionCacheDirectory -ItemType Directory -Force | Out-Null
+    }
+
+    try {
+        Copy-Item -Path $BackupPath -Destination $sessionCachePath -Force -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Test-SccInitCacheUsable {
+    param([Parameter(Mandatory)][string]$CachePath)
+
+    if (-not (Test-Path $CachePath)) {
+        return $false
+    }
+
+    try {
+        $content = Get-Content -Path $CachePath -Raw -ErrorAction Stop
+    } catch {
+        return $false
+    }
+
+    return (Test-SccInitScriptUsable -Content $content)
+}
+
+function Test-SccInitCacheHit {
+    param(
+        [Parameter(Mandatory)][string]$CachePath,
+        [Parameter(Mandatory)][string]$FingerprintPath,
+        [Parameter(Mandatory)][string]$Fingerprint,
+        [string]$SessionCacheBackupPath = ""
+    )
+
+    if (-not (Test-SccInitCacheUsable -CachePath $CachePath)) {
+        return $false
+    }
+
+    if (-not (Test-Path $FingerprintPath)) {
+        return $false
+    }
+
+    try {
+        $savedFingerprint = (Get-Content -Path $FingerprintPath -Raw -ErrorAction Stop).Trim()
+    } catch {
+        return $false
+    }
+
+    if ($savedFingerprint -ne $Fingerprint) {
+        return $false
+    }
+
+    return $true
+}
+
+function Set-SccInitCacheContent {
+    param(
+        [Parameter(Mandatory)][string]$CachePath,
+        [Parameter(Mandatory)][string]$FingerprintPath,
+        [Parameter(Mandatory)][string]$Content,
+        [Parameter(Mandatory)][string]$Fingerprint,
+        [string]$SessionCachePath = "",
+        [string]$SessionCacheBackupPath = ""
+    )
+
+    $cacheTemp = "$CachePath.$([guid]::NewGuid()).tmp"
+    $fingerprintTemp = "$FingerprintPath.$([guid]::NewGuid()).tmp"
+    $canBackupSessionCache = (-not [string]::IsNullOrWhiteSpace($SessionCacheBackupPath)) -and
+                             (-not [string]::IsNullOrWhiteSpace($SessionCachePath)) -and
+                             (Test-Path $SessionCachePath)
+    $sessionCacheTemp = if ($canBackupSessionCache) {
+        "$SessionCacheBackupPath.$([guid]::NewGuid()).tmp"
+    } else {
+        ""
+    }
+
+    try {
+        if ($canBackupSessionCache) {
+            Copy-Item -Path $SessionCachePath -Destination $sessionCacheTemp -Force -ErrorAction Stop
+        }
+
+        $Content | Set-Content -Path $cacheTemp -Encoding UTF8 -ErrorAction Stop
+        $Fingerprint | Set-Content -Path $fingerprintTemp -Encoding UTF8 -ErrorAction Stop
+        Move-Item -Path $cacheTemp -Destination $CachePath -Force -ErrorAction Stop
+        Move-Item -Path $fingerprintTemp -Destination $FingerprintPath -Force -ErrorAction Stop
+        if (-not [string]::IsNullOrWhiteSpace($sessionCacheTemp)) {
+            Move-Item -Path $sessionCacheTemp -Destination $SessionCacheBackupPath -Force -ErrorAction Stop
+        }
+        return $true
+    } catch {
+        return $false
+    } finally {
+        @($cacheTemp, $fingerprintTemp, $sessionCacheTemp) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { Remove-Item -Path $_ -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 function Invoke-SccThemeActivation {
@@ -413,24 +586,32 @@ function Invoke-SccThemeActivation {
         $cacheFile = Get-SccInitCachePath
         $fingerprint = Get-SccInitCacheFingerprint -ThemePath $themePath -OmpExecutable $themeExecutable
         $fingerprintFile = Join-Path $script:ThemeDir ".init-cache.fp"
+        $sessionCacheBackupFile = Get-SccInitSessionCacheBackupPath
 
-        $cacheHit = $false
-        if ((Test-Path $cacheFile) -and (Test-Path $fingerprintFile)) {
-            $savedFp = (Get-Content -Path $fingerprintFile -Raw).Trim()
-            if ($savedFp -eq $fingerprint) {
-                $cacheHit = $true
+        $usedCache = $false
+        if (Test-SccInitCacheHit -CachePath $cacheFile -FingerprintPath $fingerprintFile -Fingerprint $fingerprint) {
+            $cachedInit = Get-Content -Path $cacheFile -Raw
+            $backupAvailable = (-not [string]::IsNullOrWhiteSpace($sessionCacheBackupFile)) -and (Test-Path $sessionCacheBackupFile)
+            if ($backupAvailable -and (Restore-SccInitSessionCache -InitContent $cachedInit -BackupPath $sessionCacheBackupFile)) {
+                Invoke-Expression $cachedInit
+            } else {
+                $oldSessionId = Get-SccPoshSessionIdFromInitContent -Content $cachedInit
+                if (-not [string]::IsNullOrWhiteSpace($oldSessionId)) {
+                    Remove-Item -Path (Get-SccOhMyPoshSessionCachePath -SessionId $oldSessionId) -Force -ErrorAction SilentlyContinue
+                }
+                Invoke-Expression $cachedInit
             }
+            $usedCache = $true
         }
 
-        if ($cacheHit) {
-            $env:POSH_SESSION_ID = [guid]::NewGuid().ToString()
-            . $cacheFile
-        } else {
-            $initOutput = & $themeExecutable init pwsh --config $themePath 2>$null
-            # Strip the fixed POSH_SESSION_ID line so we regenerate it on cache hit
-            $sanitized = ($initOutput -split "`n" | Where-Object { $_ -notmatch '^\$env:POSH_SESSION_ID\s*=' }) -join "`n"
-            $sanitized | Set-Content -Path $cacheFile -Encoding UTF8
-            $fingerprint | Set-Content -Path $fingerprintFile -Encoding UTF8
+        if (-not $usedCache) {
+            $initOutput = (& $themeExecutable init pwsh --config $themePath 2>$null) -join "`n"
+            if (-not (Test-SccInitScriptUsable -Content $initOutput)) {
+                throw "oh-my-posh init did not return a usable prompt script."
+            }
+            $sessionId = Get-SccPoshSessionIdFromInitContent -Content $initOutput
+            $sessionCachePath = if ([string]::IsNullOrWhiteSpace($sessionId)) { "" } else { Get-SccOhMyPoshSessionCachePath -SessionId $sessionId }
+            [void](Set-SccInitCacheContent -CachePath $cacheFile -FingerprintPath $fingerprintFile -Content $initOutput -Fingerprint $fingerprint -SessionCachePath $sessionCachePath -SessionCacheBackupPath $sessionCacheBackupFile)
             Invoke-Expression $initOutput
         }
 
