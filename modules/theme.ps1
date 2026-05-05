@@ -359,7 +359,14 @@ function Get-SccInitCacheFingerprint {
         }
     }
 
-    return "$themeIdentity|$themeMtime|$ompMtime"
+    $ompVersion = ""
+    try {
+        $ompVersion = (& $OmpExecutable --version 2>$null).Trim()
+    } catch {
+        $ompVersion = "unknown"
+    }
+
+    return "$themeIdentity|$themeMtime|$ompMtime|$ompVersion"
 }
 
 function Get-SccInitCachePath {
@@ -455,7 +462,20 @@ function Test-SccInitCacheUsable {
         return $false
     }
 
-    return (Test-SccInitScriptUsable -Content $content)
+    if (-not (Test-SccInitScriptUsable -Content $content)) {
+        return $false
+    }
+
+    # Verify the referenced init script file still exists
+    $initScriptMatch = [regex]::Match($content, "'([^']+oh-my-posh[\\/]+init\.[^']+\.ps1)'")
+    if ($initScriptMatch.Success) {
+        $initScriptPath = $initScriptMatch.Groups[1].Value
+        if (-not (Test-Path $initScriptPath)) {
+            return $false
+        }
+    }
+
+    return $true
 }
 
 function Test-SccInitCacheHit {
@@ -591,17 +611,29 @@ function Invoke-SccThemeActivation {
         $usedCache = $false
         if (Test-SccInitCacheHit -CachePath $cacheFile -FingerprintPath $fingerprintFile -Fingerprint $fingerprint) {
             $cachedInit = Get-Content -Path $cacheFile -Raw
-            $backupAvailable = (-not [string]::IsNullOrWhiteSpace($sessionCacheBackupFile)) -and (Test-Path $sessionCacheBackupFile)
-            if ($backupAvailable -and (Restore-SccInitSessionCache -InitContent $cachedInit -BackupPath $sessionCacheBackupFile)) {
-                Invoke-Expression $cachedInit
-            } else {
+            try {
+                $backupAvailable = (-not [string]::IsNullOrWhiteSpace($sessionCacheBackupFile)) -and (Test-Path $sessionCacheBackupFile)
+                if ($backupAvailable -and (Restore-SccInitSessionCache -InitContent $cachedInit -BackupPath $sessionCacheBackupFile)) {
+                    Invoke-Expression $cachedInit
+                } else {
+                    $oldSessionId = Get-SccPoshSessionIdFromInitContent -Content $cachedInit
+                    if (-not [string]::IsNullOrWhiteSpace($oldSessionId)) {
+                        Remove-Item -Path (Get-SccOhMyPoshSessionCachePath -SessionId $oldSessionId) -Force -ErrorAction SilentlyContinue
+                    }
+                    Invoke-Expression $cachedInit
+                }
+                $usedCache = $true
+            } catch {
+                # Cached init failed (stale init script, corrupt session cache, etc.)
+                # Clear caches and fall through to fresh regeneration
+                Remove-Item -Path $cacheFile -Force -ErrorAction SilentlyContinue
+                Remove-Item -Path $fingerprintFile -Force -ErrorAction SilentlyContinue
+                Remove-Item -Path $sessionCacheBackupFile -Force -ErrorAction SilentlyContinue
                 $oldSessionId = Get-SccPoshSessionIdFromInitContent -Content $cachedInit
                 if (-not [string]::IsNullOrWhiteSpace($oldSessionId)) {
                     Remove-Item -Path (Get-SccOhMyPoshSessionCachePath -SessionId $oldSessionId) -Force -ErrorAction SilentlyContinue
                 }
-                Invoke-Expression $cachedInit
             }
-            $usedCache = $true
         }
 
         if (-not $usedCache) {
