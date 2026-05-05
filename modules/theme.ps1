@@ -653,6 +653,37 @@ function Invoke-SccThemeActivation {
             $script:CurrentThemeName = $ThemeName
         }
 
+        # Detect if theme uses multiline prompts (blocks with newline=true)
+        $script:SccThemeIsMultiline = $false
+        try {
+            $themeJson = Get-Content $themePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            foreach ($block in $themeJson.blocks) {
+                if ($block.newline -eq $true) {
+                    $script:SccThemeIsMultiline = $true
+                    break
+                }
+            }
+        } catch { }
+
+        # Wrap the prompt function for auto-recovery from corrupted session cache
+        if ($script:SccThemeIsMultiline) {
+            $script:SccWrappedOriginalPrompt = $Function:prompt
+            $Function:prompt = {
+                $result = & $script:SccWrappedOriginalPrompt
+                $joined = $result -join "`n"
+
+                if (-not $joined.Contains("`n")) {
+                    $ompCacheDir = Join-Path $env:USERPROFILE ".cache\oh-my-posh"
+                    if (Test-Path $ompCacheDir) {
+                        Get-ChildItem $ompCacheDir -Filter "pwsh.*.omp.cache" | Remove-Item -Force -ErrorAction SilentlyContinue
+                    }
+                    $result = & $script:SccWrappedOriginalPrompt
+                }
+
+                $result
+            }
+        }
+
         $script:ThemeStatus = "当前主题: $ThemeName"
         $script:ThemeLastError = $null
         return $true
